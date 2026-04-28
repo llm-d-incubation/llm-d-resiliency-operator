@@ -1,7 +1,7 @@
 # Project configuration
 # TODO: Replace {{PROJECT_NAME}} with your project name
-PROJECT_NAME ?= {{PROJECT_NAME}}
-REGISTRY ?= ghcr.io/llm-d
+PROJECT_NAME ?= llm-d-resiliency-operator
+REGISTRY ?= ghcr.io/llm-d-incubation
 IMAGE ?= $(REGISTRY)/$(PROJECT_NAME)
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 PLATFORMS ?= linux/amd64,linux/arm64
