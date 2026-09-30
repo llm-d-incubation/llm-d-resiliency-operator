@@ -13,12 +13,11 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	inferencev1alpha1 "github.com/llm-d/llm-d-resiliency-operator/apis/inference/v1alpha1"
+	"github.com/llm-d/llm-d-resiliency-operator/internal/controller/enginefault"
 	"github.com/llm-d/llm-d-resiliency-operator/internal/controller/recoveryrequest"
 )
 
-var (
-	scheme = runtime.NewScheme()
-)
+var scheme = runtime.NewScheme()
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
@@ -27,6 +26,7 @@ func init() {
 
 func main() {
 	klog.InitFlags(nil)
+	ctrl.SetLogger(klog.Background())
 	defer klog.Flush()
 
 	var metricsAddr string
@@ -34,6 +34,8 @@ func main() {
 	var probeAddr string
 	var podNamespace string
 	var podLabelKey string
+	var engineOptions enginefault.Options
+	engineOptions.BindFlags(flag.CommandLine)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
@@ -42,6 +44,9 @@ func main() {
 	flag.StringVar(&podNamespace, "pod-namespace", "default", "The namespace of the pod to label.")
 	flag.StringVar(&podLabelKey, "pod-label-key", "llm-d.ai/inference-serving", "The label key to match the pod.")
 	flag.Parse()
+	if engineOptions.Enabled && !enableLeaderElection {
+		klog.Fatal("vLLM FT requires --leader-elect")
+	}
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme: scheme,
@@ -67,6 +72,9 @@ func main() {
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		klog.Fatalf("unable to set up health check: %v", err)
+	}
+	if err := engineOptions.Setup(mgr); err != nil {
+		klog.Fatalf("unable to configure vLLM FT: %v", err)
 	}
 	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
 		klog.Fatalf("unable to set up ready check: %v", err)

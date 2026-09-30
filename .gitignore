@@ -33,3 +33,6 @@ Thumbs.db
 .envrc
 .secrets.env
 vendor/
+__pycache__/
+.pytest_cache/
+.venv/

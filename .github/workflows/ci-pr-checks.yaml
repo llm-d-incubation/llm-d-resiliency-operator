@@ -4,6 +4,7 @@ on:
   pull_request:
     branches:
       - main
+      - initialcontroller
 
 jobs:
   # Detect if PR contains code changes (skip expensive checks for docs-only PRs)
@@ -96,6 +97,12 @@ jobs:
       - name: Run ruff format check
         if: steps.check-python.outputs.has_python == 'true'
         run: ruff format --check .
+
+      - name: Test runtime helpers
+        if: steps.check-python.outputs.has_python == 'true'
+        run: |
+          pip install -r runtime/vllm/requirements-test.txt
+          python -m pytest runtime/vllm -q
 
   # Container: build (no push) to validate Dockerfile
   container-build:

@@ -1,0 +1,18 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-d-resiliency-operator
+  namespace: default
+spec:
+  template:
+    spec:
+      containers:
+      - name: manager
+        args:
+        - --leader-elect
+        - --enable-vllm-ft
+        - --vllm-lws=wide-ep
+        - --vllm-namespace=default
+        - --vllm-model=model
+        - --vllm-local-ranks=2
+        - --vllm-min-survivors=2

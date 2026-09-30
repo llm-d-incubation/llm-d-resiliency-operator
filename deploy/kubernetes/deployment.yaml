@@ -18,7 +18,7 @@ spec:
       containers:
       - command:
         - /manager
-        image: {{$IMAGE_NAME}}
+        image: llm-d-resiliency-operator:local
         name: manager
         securityContext:
           allowPrivilegeEscalation: false

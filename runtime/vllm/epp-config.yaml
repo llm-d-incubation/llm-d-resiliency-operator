@@ -1,0 +1,47 @@
+# Copyright 2026 The llm-d Authors.
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: llm-d.ai/v1alpha1
+kind: EndpointPickerConfig
+plugins:
+- type: metrics-data-source
+  parameters:
+    interval: 200ms
+- type: core-metrics-extractor
+  parameters:
+    engineConfigs:
+    - name: vllm
+      queuedRequestsSpec: vllm:num_requests_waiting
+      runningRequestsSpec: vllm:num_requests_running
+      kvUsageSpec: vllm:kv_cache_usage_perc
+      customMetrics:
+      - attributeKey: native_health
+        metricSpec: vllm:engine_healthy
+- type: endpoint-attribute-filter
+  name: healthy-ranks
+  parameters:
+    attribute: native_health
+    onMissing: Fail
+    fallbackOnEmpty: false
+    algorithm:
+      type: threshold
+      threshold:
+        operator: Equal
+        value: 1
+- type: queue-scorer
+- type: kv-cache-utilization-scorer
+- type: max-score-picker
+- type: single-profile-handler
+dataLayer:
+  sources:
+  - pluginRef: metrics-data-source
+    extractors:
+    - pluginRef: core-metrics-extractor
+schedulingProfiles:
+- name: default
+  plugins:
+  - pluginRef: healthy-ranks
+  - pluginRef: queue-scorer
+    weight: 1
+  - pluginRef: kv-cache-utilization-scorer
+    weight: 1
+  - pluginRef: max-score-picker
