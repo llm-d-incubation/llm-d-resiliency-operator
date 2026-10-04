@@ -9,7 +9,7 @@ import (
 
 	ctrl "sigs.k8s.io/controller-runtime"
 
-	"github.com/llm-d/llm-d-resiliency-operator/internal/engine"
+	"github.com/llm-d-incubation/llm-d-resiliency-operator/internal/engine"
 )
 
 // Runner shares the manager's leadership and cancellation lifecycle.

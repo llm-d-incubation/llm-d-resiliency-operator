@@ -25,7 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/llm-d/llm-d-resiliency-operator/internal/engine"
+	"github.com/llm-d-incubation/llm-d-resiliency-operator/internal/engine"
 )
 
 const labelPrefix = "leaderworkerset.sigs.k8s.io/"

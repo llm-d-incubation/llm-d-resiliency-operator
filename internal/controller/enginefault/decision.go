@@ -5,7 +5,7 @@ package enginefault
 import (
 	"slices"
 
-	"github.com/llm-d/llm-d-resiliency-operator/internal/engine"
+	"github.com/llm-d-incubation/llm-d-resiliency-operator/internal/engine"
 )
 
 type Decision struct {

@@ -26,8 +26,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	"github.com/llm-d/llm-d-resiliency-operator/internal/engine"
-	"github.com/llm-d/llm-d-resiliency-operator/internal/workload/lws"
+	"github.com/llm-d-incubation/llm-d-resiliency-operator/internal/engine"
+	"github.com/llm-d-incubation/llm-d-resiliency-operator/internal/workload/lws"
 )
 
 func fixture(t *testing.T) (client.Client, lws.Config) {

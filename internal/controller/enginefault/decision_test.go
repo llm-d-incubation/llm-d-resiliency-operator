@@ -6,8 +6,8 @@ package enginefault_test
 import (
 	"testing"
 
-	"github.com/llm-d/llm-d-resiliency-operator/internal/controller/enginefault"
-	"github.com/llm-d/llm-d-resiliency-operator/internal/engine"
+	"github.com/llm-d-incubation/llm-d-resiliency-operator/internal/controller/enginefault"
+	"github.com/llm-d-incubation/llm-d-resiliency-operator/internal/engine"
 )
 
 func TestProcessLossDoesNotAuthorizeNativeExclusion(t *testing.T) {

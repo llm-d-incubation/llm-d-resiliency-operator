@@ -9,8 +9,8 @@ import (
 
 	ctrl "sigs.k8s.io/controller-runtime"
 
-	"github.com/llm-d/llm-d-resiliency-operator/internal/engine/vllm"
-	"github.com/llm-d/llm-d-resiliency-operator/internal/workload/lws"
+	"github.com/llm-d-incubation/llm-d-resiliency-operator/internal/engine/vllm"
+	"github.com/llm-d-incubation/llm-d-resiliency-operator/internal/workload/lws"
 )
 
 type Options struct {

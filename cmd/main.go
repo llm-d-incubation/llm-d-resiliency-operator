@@ -12,9 +12,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	inferencev1alpha1 "github.com/llm-d/llm-d-resiliency-operator/apis/inference/v1alpha1"
-	"github.com/llm-d/llm-d-resiliency-operator/internal/controller/enginefault"
-	"github.com/llm-d/llm-d-resiliency-operator/internal/controller/recoveryrequest"
+	inferencev1alpha1 "github.com/llm-d-incubation/llm-d-resiliency-operator/apis/inference/v1alpha1"
+	"github.com/llm-d-incubation/llm-d-resiliency-operator/internal/controller/enginefault"
+	"github.com/llm-d-incubation/llm-d-resiliency-operator/internal/controller/recoveryrequest"
 )
 
 var scheme = runtime.NewScheme()

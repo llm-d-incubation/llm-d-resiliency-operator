@@ -1,4 +1,4 @@
-# Multi-stage operator build
+# Multi-stage build for llm-d-resiliency-operator
 # Supports multi-arch: linux/amd64, linux/arm64
 
 # --- Build stage ---
@@ -7,7 +7,7 @@ FROM golang:1.25 AS builder
 WORKDIR /workspace
 
 # Cache dependencies
-COPY go.mod go.sum ./
+COPY go.mod go.sum* ./
 RUN go mod download
 
 # Copy source and build

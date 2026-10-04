@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/llm-d/llm-d-resiliency-operator/internal/engine"
-	"github.com/llm-d/llm-d-resiliency-operator/internal/engine/vllm"
+	"github.com/llm-d-incubation/llm-d-resiliency-operator/internal/engine"
+	"github.com/llm-d-incubation/llm-d-resiliency-operator/internal/engine/vllm"
 )
 
 type command struct {

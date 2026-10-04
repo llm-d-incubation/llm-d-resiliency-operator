@@ -8,7 +8,7 @@ import (
 // +genclient
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
-// RecoveryRequest is the Schema for the recoveryrequests API
+// RecoveryRequest is the Schema for the recoveryrequests API.
 type RecoveryRequest struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -17,7 +17,7 @@ type RecoveryRequest struct {
 	Status RecoveryRequestStatus `json:"status,omitempty"`
 }
 
-// RecoveryRequestSpec defines the desired state of RecoveryRequest
+// RecoveryRequestSpec defines the desired state of RecoveryRequest.
 type RecoveryRequestSpec struct {
 	NodeName        string `json:"nodeName"`
 	DeviceID        string `json:"deviceID,omitempty"`
@@ -25,7 +25,7 @@ type RecoveryRequestSpec struct {
 	RequestedAction string `json:"requestedAction"`
 }
 
-// RecoveryRequestStatus defines the observed state of RecoveryRequest
+// RecoveryRequestStatus defines the observed state of RecoveryRequest.
 type RecoveryRequestStatus struct {
 	Phase      string             `json:"phase,omitempty"`
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
@@ -33,7 +33,7 @@ type RecoveryRequestStatus struct {
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
-// RecoveryRequestList contains a list of RecoveryRequest
+// RecoveryRequestList contains a list of RecoveryRequest.
 type RecoveryRequestList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`

@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/llm-d/llm-d-resiliency-operator/internal/engine"
+	"github.com/llm-d-incubation/llm-d-resiliency-operator/internal/engine"
 )
 
 func statuses(states ...string) []engine.RankStatus {
