@@ -10,6 +10,14 @@ def processes():
     ]
 
 
+def test_original_rank_layout_is_available_before_processes_start():
+    observer = ProcessObserver("pod-a", [2, 3])
+    assert [rank["id"] for rank in observer.snapshot()["ranks"]] == [2, 3]
+    observer.sample([])
+    assert [rank["id"] for rank in observer.snapshot()["ranks"]] == [2, 3]
+    assert not any(rank["engine_dead"] for rank in observer.snapshot()["ranks"])
+
+
 def test_api_exit_is_not_engine_death():
     observer = ProcessObserver("pod-a", [1])
     observer.sample(processes())

@@ -13,5 +13,3 @@ spec:
         - --enable-vllm-ft
         - --vllm-lws=wide-ep
         - --vllm-namespace=default
-        - --vllm-model=model
-        - --vllm-local-ranks=2

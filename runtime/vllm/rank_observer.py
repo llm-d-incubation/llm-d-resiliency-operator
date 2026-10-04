@@ -22,7 +22,7 @@ class ProcessObserver:
         }
         self.identities = {}
         self.lock = threading.Lock()
-        self.current = {"schema_version": 1, "pod_uid": pod_uid, "ranks": []}
+        self.sample([])
 
     def sample(self, processes):
         unknown = {

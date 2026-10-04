@@ -18,11 +18,10 @@ import (
 
 type Adapter struct {
 	Client *http.Client
-	Model  string
 }
 
-func New(model string) *Adapter {
-	return &Adapter{Client: &http.Client{Timeout: 10 * time.Second}, Model: model}
+func New() *Adapter {
+	return &Adapter{Client: &http.Client{Timeout: 10 * time.Second}}
 }
 
 //nolint:gocritic // Unnamed returns follow nonamedreturns; callers need both body and HTTP status.
@@ -229,8 +228,10 @@ func (adapter *Adapter) Verify(ctx context.Context, group engine.Group, ranks []
 		if i < 0 {
 			return fmt.Errorf("missing rank %d", rank)
 		}
+		// vLLM uses its base model when model is omitted. Workload model aliases
+		// and LoRA names do not need to be duplicated in operator configuration.
 		payload := map[string]any{
-			"model": adapter.Model, "prompt": "One plus one equals", "max_tokens": 8, "temperature": 0,
+			"prompt": "One plus one equals", "max_tokens": 8, "temperature": 0,
 		}
 		b, _, err := adapter.request(ctx, http.MethodPost, group.Endpoints[i].URL+"/v1/completions", payload)
 		if err != nil {

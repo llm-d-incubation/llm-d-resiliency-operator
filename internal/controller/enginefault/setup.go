@@ -15,7 +15,6 @@ import (
 
 type Options struct {
 	Enabled    bool
-	Model      string
 	Workload   lws.Config
 	Controller Config
 }
@@ -25,8 +24,6 @@ func (options *Options) BindFlags(flags *flag.FlagSet) {
 	flags.BoolVar(&options.Enabled, "enable-vllm-ft", false, "enable vLLM engine fault handling")
 	flags.StringVar(&options.Workload.Namespace, "vllm-namespace", "default", "LWS namespace")
 	flags.StringVar(&options.Workload.Name, "vllm-lws", "", "LWS name")
-	flags.StringVar(&options.Model, "vllm-model", "", "served model name")
-	flags.IntVar(&options.Workload.LocalRanks, "vllm-local-ranks", 2, "original DP ranks per Pod")
 	flags.IntVar(&options.Workload.BasePort, "vllm-api-port", 8000, "first per-rank API port")
 	flags.IntVar(&options.Workload.ObserverPort, "vllm-observer-port", 9257, "process observer port")
 	flags.IntVar(&options.Controller.StorePort, "vllm-ft-store-port", 29600, "replacement FT store port")
@@ -40,9 +37,6 @@ func (options *Options) Setup(mgr ctrl.Manager) error {
 	if !options.Enabled {
 		return nil
 	}
-	if options.Model == "" {
-		return fmt.Errorf("vLLM FT requires --vllm-model")
-	}
 	if options.Controller.DiagnosisTimeout <= 0 || options.Controller.ApplyTimeout <= 0 ||
 		options.Controller.StorePort < 1 || options.Controller.StorePort > 65535 {
 		return fmt.Errorf("invalid vLLM deadline or FT store port")
@@ -52,7 +46,7 @@ func (options *Options) Setup(mgr ctrl.Manager) error {
 		return err
 	}
 	runner := &Runner{
-		Adapter: vllm.New(options.Model), Workload: workload,
+		Adapter: vllm.New(), Workload: workload,
 		Config: options.Controller,
 	}
 	return mgr.Add(runner)

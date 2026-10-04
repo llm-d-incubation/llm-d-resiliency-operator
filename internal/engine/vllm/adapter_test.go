@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -50,7 +51,7 @@ func TestScaleDownFansOutOneRoundBeforeWaiting(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	a := vllm.New("model")
+	a := vllm.New()
 	a.Client.Timeout = time.Second
 	g := engine.Group{ID: "group"}
 	for i := range 4 {
@@ -82,7 +83,7 @@ func TestAcceptanceDoesNotHideSubsequentFTFailure(t *testing.T) {
 			`"ft_state":"failed","ft_error":"status is HEALTHY","last_ft_request_id":"r"}]}`)
 	}))
 	defer server.Close()
-	a := vllm.New("model")
+	a := vllm.New()
 	g := engine.Group{ID: "g", Endpoints: []engine.Endpoint{{Rank: 0, URL: server.URL}}}
 	_, err := a.ResumeEngine(context.Background(), g, engine.Round{ID: "r", GroupID: "g", Participants: []int{0}})
 	if err != nil {
@@ -107,7 +108,7 @@ func TestStatusRejectsMisroutedOrMissingEngine(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { write(t, w, payload) }))
 			defer srv.Close()
 			group := engine.Group{Endpoints: []engine.Endpoint{{Rank: 0, URL: srv.URL}}}
-			s := vllm.New("model").EngineStatus(context.Background(), group)[0]
+			s := vllm.New().EngineStatus(context.Background(), group)[0]
 			if s.Status != "unknown" || s.Error == "" {
 				t.Fatalf("untrusted endpoint admitted: %+v", s)
 			}
@@ -158,7 +159,7 @@ func TestProcessExitEvidenceIsPodScopedAndPreservesNativeServingState(t *testing
 			group := engine.Group{Endpoints: []engine.Endpoint{{
 				Rank: 1, URL: server.URL, PodUID: "pod-a", DiagnosticsURL: server.URL + "/processes",
 			}}}
-			status := vllm.New("model").EngineStatus(context.Background(), group)[0]
+			status := vllm.New().EngineStatus(context.Background(), group)[0]
 			if status.Status != scenario.want {
 				t.Fatalf("unexpected classification: %+v", status)
 			}
@@ -185,7 +186,7 @@ func TestInvalidRoundNeverDispatches(t *testing.T) {
 		{ID: "r", GroupID: "g", Participants: []int{1}},
 		{ID: "r", GroupID: "g", Participants: []int{0}, MasterIP: "10.0.0.1"},
 	} {
-		a := vllm.New("model")
+		a := vllm.New()
 		g := engine.Group{ID: "g", Endpoints: []engine.Endpoint{{Rank: 0, URL: "http://must-not-be-contacted.invalid"}}}
 		if _, err := a.ResumeEngine(context.Background(), g, round); err == nil {
 			t.Fatalf("accepted invalid round %+v", round)
@@ -221,7 +222,7 @@ func TestPartialDispatchRetainsEachAcceptance(t *testing.T) {
 				ID: "round", GroupID: "g", Participants: []int{1, 3}, Removed: []int{0},
 				MasterIP: "10.0.0.1", StorePort: 29600,
 			}
-			acks, err := vllm.New("model").ScaleDown(context.Background(), group, round)
+			acks, err := vllm.New().ScaleDown(context.Background(), group, round)
 			if err == nil || len(acks) != 2 || !acks[0].Accepted || acks[1].Accepted || acks[1].Error == "" {
 				t.Fatalf("lost partial acceptance: %+v, %v", acks, err)
 			}
@@ -237,7 +238,7 @@ func TestInvalidTopologyNeverDispatches(t *testing.T) {
 		{ID: "g", Endpoints: []engine.Endpoint{{Rank: -1, URL: endpoint.URL}}},
 	} {
 		round := engine.Round{ID: "r", GroupID: group.ID, Participants: []int{group.Endpoints[0].Rank}}
-		if _, err := vllm.New("model").ResumeEngine(context.Background(), group, round); err == nil {
+		if _, err := vllm.New().ResumeEngine(context.Background(), group, round); err == nil {
 			t.Fatalf("accepted invalid topology: %+v", group)
 		}
 	}
@@ -252,9 +253,41 @@ func TestVerifyRequiresGeneratedTokens(t *testing.T) {
 	}))
 	defer srv.Close()
 	group := engine.Group{Endpoints: []engine.Endpoint{{Rank: 0, URL: srv.URL}}}
-	err := vllm.New("model").Verify(context.Background(), group, []int{0})
+	err := vllm.New().Verify(context.Background(), group, []int{0})
 	if err == nil || !strings.Contains(err.Error(), "no generated completion") {
 		t.Fatalf("accepted empty inference: %v", err)
+	}
+}
+
+func TestVerifyUsesRuntimeBaseModelForEveryRank(t *testing.T) {
+	var completions atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if (request.URL.Path != "/rank0/v1/completions" && request.URL.Path != "/rank1/v1/completions") ||
+			request.Method != http.MethodPost {
+			t.Errorf("unexpected verification request: %s %s", request.Method, request.URL.Path)
+		}
+		var payload map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+			t.Error(err)
+		}
+		if _, configured := payload["model"]; configured {
+			t.Error("verification must let vLLM select its base model")
+		}
+		if request.Header.Get("X-IRO-Verification") != "" {
+			t.Error("verification must use the ordinary inference path")
+		}
+		completions.Add(1)
+		write(t, w, `{"choices":[{"text":"2"}],"usage":{"completion_tokens":1}}`)
+	}))
+	defer server.Close()
+	group := engine.Group{Endpoints: []engine.Endpoint{
+		{Rank: 0, URL: server.URL + "/rank0"}, {Rank: 1, URL: server.URL + "/rank1"},
+	}}
+	if err := vllm.New().Verify(t.Context(), group, []int{0, 1}); err != nil {
+		t.Fatal(err)
+	}
+	if completions.Load() != 2 {
+		t.Fatalf("expected two inference probes, got %d", completions.Load())
 	}
 }
 
