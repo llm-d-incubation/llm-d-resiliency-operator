@@ -15,4 +15,3 @@ spec:
         - --vllm-namespace=default
         - --vllm-model=model
         - --vllm-local-ranks=2
-        - --vllm-min-survivors=2

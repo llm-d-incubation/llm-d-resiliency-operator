@@ -18,7 +18,7 @@ type Decision struct {
 // Decide only excludes engines in the native terminal dead state. Survivor
 // masks and process observations cannot fence an excluded frontend: scale_down
 // changes surviving engines, while EPP independently uses native engine health.
-func Decide(allStatuses []engine.RankStatus, excluded []int, minSurvivors int) Decision {
+func Decide(allStatuses []engine.RankStatus, excluded []int) Decision {
 	active := make([]*engine.RankStatus, 0, len(allStatuses))
 	for index := range allStatuses {
 		status := &allStatuses[index]
@@ -87,9 +87,11 @@ func Decide(allStatuses []engine.RankStatus, excluded []int, minSurvivors int) D
 		}
 		participants = append(participants, status.Rank)
 	}
-	if len(participants) < minSurvivors {
-		return Decision{Action: "reset", Reason: "insufficient configured survivor expert capacity"}
+	if len(participants) == 0 {
+		return Decision{Action: "reset", Reason: "no surviving ranks"}
 	}
+	// vLLM validates expert capacity during scale_down. Reconcile its result
+	// rather than predicting recovery from a configured survivor count.
 	for _, status := range active {
 		if !slices.Contains(removed, status.Rank) &&
 			(status.Status != "unhealthy" || status.ProcessExitConfirmed || status.FTState != "") {

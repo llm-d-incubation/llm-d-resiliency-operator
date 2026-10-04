@@ -28,8 +28,8 @@ import (
 const labelPrefix = "leaderworkerset.sigs.k8s.io/"
 
 type Config struct {
-	Namespace, Name                               string
-	LocalRanks, GroupPods, BasePort, ObserverPort int
+	Namespace, Name                    string
+	LocalRanks, BasePort, ObserverPort int
 }
 
 type Client struct {
@@ -48,7 +48,7 @@ func New(reader client.Reader, writer client.Client, config Config) (*Client, er
 		config.ObserverPort = 9257
 	}
 	if reader == nil || writer == nil || config.Namespace == "" || config.Name == "" ||
-		config.LocalRanks < 1 || config.GroupPods < 1 || config.BasePort < 1 ||
+		config.LocalRanks < 1 || config.BasePort < 1 ||
 		config.BasePort > 65535 || config.LocalRanks > 65536-config.BasePort ||
 		config.ObserverPort < 1 || config.ObserverPort > 65535 {
 		return nil, fmt.Errorf("invalid LWS configuration")
@@ -66,7 +66,8 @@ func (workload *Client) Discover(ctx context.Context) (engine.Group, error) {
 	}, set); err != nil {
 		return engine.Group{}, err
 	}
-	if err := workload.validate(set); err != nil {
+	groupPods, err := workload.validate(set)
+	if err != nil {
 		return engine.Group{}, err
 	}
 	var pods corev1.PodList
@@ -75,8 +76,8 @@ func (workload *Client) Discover(ctx context.Context) (engine.Group, error) {
 	}); err != nil {
 		return engine.Group{}, err
 	}
-	if len(pods.Items) != workload.config.GroupPods {
-		return engine.Group{}, fmt.Errorf("expected %d group Pods, found %d", workload.config.GroupPods, len(pods.Items))
+	if len(pods.Items) != groupPods {
+		return engine.Group{}, fmt.Errorf("expected %d group Pods from LWS size, found %d", groupPods, len(pods.Items))
 	}
 	group := engine.Group{}
 	identities := []string{string(set.GetUID())}
@@ -84,7 +85,7 @@ func (workload *Client) Discover(ctx context.Context) (engine.Group, error) {
 	for index := range pods.Items {
 		pod := &pods.Items[index]
 		worker, err := strconv.Atoi(pod.Labels[labelPrefix+"worker-index"])
-		if err != nil || worker < 0 || worker >= workload.config.GroupPods || seen[worker] ||
+		if err != nil || worker < 0 || worker >= groupPods || seen[worker] ||
 			pod.Name != workload.podName(worker) {
 			return engine.Group{}, fmt.Errorf("invalid worker identity for Pod %s", pod.Name)
 		}
@@ -113,7 +114,7 @@ func (workload *Client) Discover(ctx context.Context) (engine.Group, error) {
 	return group, nil
 }
 
-func (workload *Client) validate(set *unstructured.Unstructured) error {
+func (workload *Client) validate(set *unstructured.Unstructured) (int, error) {
 	var value struct {
 		Spec struct {
 			Replicas             *int64 `json:"replicas"`
@@ -125,15 +126,19 @@ func (workload *Client) validate(set *unstructured.Unstructured) error {
 		} `json:"spec"`
 	}
 	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(set.Object, &value); err != nil {
-		return err
+		return 0, err
 	}
 	if !set.GetDeletionTimestamp().IsZero() || value.Spec.Replicas == nil || *value.Spec.Replicas != 1 ||
-		value.Spec.LeaderWorkerTemplate.Size == nil || *value.Spec.LeaderWorkerTemplate.Size != int64(workload.config.GroupPods) ||
+		value.Spec.LeaderWorkerTemplate.Size == nil || *value.Spec.LeaderWorkerTemplate.Size < 1 ||
 		value.Spec.LeaderWorkerTemplate.RestartPolicy != "RecreateGroupOnPodRestart" ||
 		(value.Spec.GroupIdentity != "" && value.Spec.GroupIdentity != "Ordinal") {
-		return fmt.Errorf("requires one ordinal LWS group of size %d with RecreateGroupOnPodRestart", workload.config.GroupPods)
+		return 0, fmt.Errorf("requires one ordinal LWS group with positive size and RecreateGroupOnPodRestart")
 	}
-	return nil
+	groupPods := int(*value.Spec.LeaderWorkerTemplate.Size)
+	if int64(groupPods) != *value.Spec.LeaderWorkerTemplate.Size {
+		return 0, fmt.Errorf("LWS group size exceeds supported integer range")
+	}
+	return groupPods, nil
 }
 
 func podIdentity(pod *corev1.Pod) ([]string, error) {

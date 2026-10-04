@@ -75,10 +75,8 @@ The opt-in adapter handles engine faults while LWS Pods remain running. It retri
 usable ranks or excludes failed ranks, verifies inference, and resets the group
 when in-place FT cannot complete. RecoveryRequest behavior is unchanged.
 
-See the [design](docs/proposals/vllm-engine-adapter.md),
-[deployment example](deploy/vllm-ft/README.md),
-[runtime bridge](runtime/vllm/README.md), and
-[validation coverage](docs/testing/vllm-ft.md).
+See the [deployment example](deploy/vllm-ft/README.md) and
+[runtime bridge](runtime/vllm/README.md).
 
 ## Configuration
 

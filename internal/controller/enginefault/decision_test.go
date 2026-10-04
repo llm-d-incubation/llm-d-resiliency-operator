@@ -26,7 +26,7 @@ func TestProcessLossDoesNotAuthorizeNativeExclusion(t *testing.T) {
 				status[rank] = engine.RankStatus{Rank: rank, Status: native}
 			}
 			status[1].ProcessExitConfirmed = true
-			decision := enginefault.Decide(status, nil, 2)
+			decision := enginefault.Decide(status, nil)
 			if decision.Action != "wait" || len(decision.Removed) != 0 || len(decision.Participants) != 0 {
 				t.Fatalf("process loss cannot establish native request rejection or a usable survivor: %+v", decision)
 			}
@@ -41,7 +41,7 @@ func TestInFlightRecoveryCannotAuthorizeAnotherAction(t *testing.T) {
 				{Rank: 0, Status: native},
 				{Rank: 1, Status: native, FTState: "recovering"},
 			}
-			if decision := enginefault.Decide(status, nil, 2); decision.Action != "wait" {
+			if decision := enginefault.Decide(status, nil); decision.Action != "wait" {
 				t.Fatalf("in-flight recovery allowed premature success or a concurrent retry: %+v", decision)
 			}
 		})

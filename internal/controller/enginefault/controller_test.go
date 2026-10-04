@@ -37,8 +37,15 @@ func TestFaultDecisionsPreserveOriginalMembership(t *testing.T) {
 		{"worker death", statuses("unhealthy", "dead", "unhealthy", "unhealthy"), nil, "scale_down", []int{1}, []int{0, 2, 3}},
 		{"multiple deaths", statuses("unhealthy", "dead", "unhealthy", "dead"), nil, "scale_down", []int{1, 3}, []int{0, 2}},
 		{"repeated loss", statuses("unhealthy", "dead", "unhealthy", "unknown"), []int{3}, "scale_down", []int{1}, []int{0, 2}},
-		{"capacity", statuses("unhealthy", "dead", "dead", "dead"), nil, "reset", nil, nil},
-		{"capacity before survivor diagnosis", statuses("healthy", "dead", "dead", "dead"), nil, "reset", nil, nil},
+		{
+			"single survivor delegates capacity to vLLM", statuses("unhealthy", "dead", "dead", "dead"), nil,
+			"scale_down",
+			[]int{1, 2, 3},
+			[]int{0},
+		},
+		{"single survivor waits for diagnosis", statuses("healthy", "dead", "dead", "dead"), nil, "wait", nil, nil},
+		{"no survivors", statuses("dead", "dead", "dead", "dead"), nil, "reset", nil, nil},
+		{"no survivors after exclusion", statuses("unknown", "dead", "dead", "dead"), []int{0}, "reset", nil, nil},
 		{"unknown is not lost capacity", statuses("healthy", "unknown", "unknown", "unknown"), nil, "frontend_degraded", nil, []int{0}},
 		{"wait for peers", statuses("healthy", "dead", "unhealthy", "diagnosing"), nil, "wait", nil, nil},
 		{"frontend only", statuses("healthy", "unknown", "healthy", "healthy"), nil, "frontend_degraded", nil, []int{0, 2, 3}},
@@ -47,7 +54,7 @@ func TestFaultDecisionsPreserveOriginalMembership(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			d := Decide(tt.states, tt.excluded, 2)
+			d := Decide(tt.states, tt.excluded)
 			if d.Action != tt.action || !reflect.DeepEqual(d.Removed, tt.removed) || !reflect.DeepEqual(d.Participants, tt.participants) {
 				t.Fatalf("unexpected decision: %+v", d)
 			}
@@ -60,7 +67,7 @@ func TestHungRankMasksDoNotAuthorizeUnfencedExclusion(t *testing.T) {
 	for _, i := range []int{0, 2, 3} {
 		s[i].Mask = []int{0, 1, 0, 0}
 	}
-	if d := Decide(s, nil, 2); d.Action != "wait" {
+	if d := Decide(s, nil); d.Action != "wait" {
 		t.Fatalf("mask-only diagnosis authorized unsafe exclusion: %+v", d)
 	}
 	controller, adapter, workload := setup(t)
@@ -72,6 +79,43 @@ func TestHungRankMasksDoNotAuthorizeUnfencedExclusion(t *testing.T) {
 	step(t, controller)
 	if len(adapter.dispatches) != 0 || len(workload.resets) != 1 {
 		t.Fatal("unfenced stall must reset after bounded diagnosis")
+	}
+}
+
+func TestSingleSurvivorRecoveryUsesRuntimeResult(t *testing.T) {
+	for _, outcome := range []string{"success", "dispatch rejected", "capacity failure"} {
+		t.Run(outcome, func(t *testing.T) {
+			controller, adapter, workload := setup(t)
+			adapter.status = statuses("unhealthy", "dead", "dead", "dead")
+			if outcome == "dispatch rejected" {
+				adapter.dispatchErr = errors.New("runtime rejected scale_down")
+			}
+			step(t, controller)
+			ageDiagnosis(controller)
+			step(t, controller)
+			if len(adapter.dispatches) != 1 || !slices.Equal(adapter.dispatches[0].Participants, []int{0}) ||
+				!slices.Equal(adapter.dispatches[0].Removed, []int{1, 2, 3}) {
+				t.Fatal("controller did not delegate single-survivor recovery to vLLM")
+			}
+			switch outcome {
+			case "capacity failure":
+				adapter.status[0].FTState = "failed"
+				adapter.status[0].FTError = "EPLB redundancy insufficient"
+				step(t, controller)
+			case "success":
+				adapter.status[0].Status = "healthy"
+				step(t, controller)
+			}
+			state := controller.Snapshot()
+			if outcome == "success" {
+				if state.Phase != "serving" || !slices.Equal(state.Verified, []int{0}) ||
+					!slices.Equal(state.Excluded, []int{1, 2, 3}) || len(workload.resets) != 0 {
+					t.Fatalf("successful runtime recovery was not verified: %+v", state)
+				}
+			} else if state.Phase != "resetting" || len(workload.resets) != 1 || len(state.Verified) != 0 {
+				t.Fatalf("runtime failure did not request reset: %+v", state)
+			}
+		})
 	}
 }
 

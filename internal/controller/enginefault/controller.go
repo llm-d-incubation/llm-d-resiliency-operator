@@ -29,14 +29,13 @@ type Config struct {
 	ApplyTimeout         time.Duration
 	StartupTimeout       time.Duration
 	RetryStabilityWindow time.Duration
-	MinSurvivors         int
 	StorePort            int
 }
 
 func Defaults() Config {
 	return Config{
 		PollInterval: time.Second, DiagnosisTimeout: 75 * time.Second, ApplyTimeout: 90 * time.Second,
-		StartupTimeout: 10 * time.Minute, RetryStabilityWindow: 2 * time.Minute, MinSurvivors: 2, StorePort: 29600,
+		StartupTimeout: 10 * time.Minute, RetryStabilityWindow: 2 * time.Minute, StorePort: 29600,
 	}
 }
 
@@ -383,7 +382,7 @@ func (controller *Controller) Step(ctx context.Context) error {
 		return controller.finishRound(ctx, state, now)
 	}
 
-	decision := Decide(state.Status, state.Excluded, controller.Config.MinSurvivors)
+	decision := Decide(state.Status, state.Excluded)
 	if decision.Action == "frontend_degraded" {
 		if state.Phase == "serving" && slices.Equal(state.Verified, decision.Participants) {
 			return nil

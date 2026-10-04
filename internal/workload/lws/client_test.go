@@ -60,7 +60,7 @@ func fixture(t *testing.T) (client.Client, lws.Config) {
 		})
 	}
 	return fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build(), lws.Config{
-		Namespace: "test", Name: "model", LocalRanks: 2, GroupPods: 2,
+		Namespace: "test", Name: "model", LocalRanks: 2,
 	}
 }
 
@@ -120,7 +120,6 @@ func TestConfiguration(t *testing.T) {
 	}{
 		{"namespace", func(config *lws.Config) { config.Namespace = "" }},
 		{"no ranks", func(config *lws.Config) { config.LocalRanks = 0 }},
-		{"no Pods", func(config *lws.Config) { config.GroupPods = 0 }},
 		{"port range", func(config *lws.Config) { config.BasePort = 65535 }},
 		{"observer port", func(config *lws.Config) { config.ObserverPort = -1 }},
 	} {
@@ -135,6 +134,63 @@ func TestConfiguration(t *testing.T) {
 	}
 }
 
+func TestDiscoverReadsCurrentLWSGroupSize(t *testing.T) {
+	t.Parallel()
+	for _, size := range []int{1, 3} {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			t.Parallel()
+			api, config := fixture(t)
+			workload := newWorkload(t, api, config)
+			original := discover(t, workload)
+			set := &unstructured.Unstructured{}
+			set.SetGroupVersionKind(schema.GroupVersionKind{
+				Group: "leaderworkerset.x-k8s.io", Version: "v1", Kind: "LeaderWorkerSet",
+			})
+			if err := api.Get(t.Context(), client.ObjectKey{Namespace: "test", Name: "model"}, set); err != nil {
+				t.Fatal(err)
+			}
+			if err := unstructured.SetNestedField(set.Object, int64(size), "spec", "leaderWorkerTemplate", "size"); err != nil {
+				t.Fatal(err)
+			}
+			if err := api.Update(t.Context(), set); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := workload.Discover(t.Context()); err == nil {
+				t.Fatal("discovery accepted a Pod count that disagrees with the current LWS size")
+			}
+			var worker corev1.Pod
+			if err := api.Get(t.Context(), client.ObjectKey{Namespace: "test", Name: "model-0-1"}, &worker); err != nil {
+				t.Fatal(err)
+			}
+			if size == 1 {
+				if err := api.Delete(t.Context(), &worker); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				worker.Name = "model-0-2"
+				worker.UID = "model-0-2-uid"
+				worker.ResourceVersion = ""
+				worker.Labels["leaderworkerset.sigs.k8s.io/worker-index"] = "2"
+				worker.Status.PodIP = "10.0.0.3"
+				worker.Status.ContainerStatuses[0].ContainerID = "model-0-2-container"
+				if err := api.Create(t.Context(), &worker); err != nil {
+					t.Fatal(err)
+				}
+			}
+			group := discover(t, workload)
+			if len(group.Endpoints) != size*config.LocalRanks || group.ID == original.ID {
+				t.Fatalf("discovery did not follow the current LWS size: %+v", group)
+			}
+			for rank, endpoint := range group.Endpoints {
+				wantURL := fmt.Sprintf("http://10.0.0.%d:%d", rank/2+1, 8000+rank%2)
+				if endpoint.Rank != rank || endpoint.URL != wantURL {
+					t.Fatalf("incorrect original-rank endpoint: %+v", endpoint)
+				}
+			}
+		})
+	}
+}
+
 func TestDiscoverRejectsInvalidTopology(t *testing.T) {
 	t.Parallel()
 	for _, test := range []struct {
@@ -143,7 +199,10 @@ func TestDiscoverRejectsInvalidTopology(t *testing.T) {
 		value any
 	}{
 		{"replicas", []string{"spec", "replicas"}, int64(2)},
-		{"size", []string{"spec", "leaderWorkerTemplate", "size"}, int64(3)},
+		{"zero size", []string{"spec", "leaderWorkerTemplate", "size"}, int64(0)},
+		{"negative size", []string{"spec", "leaderWorkerTemplate", "size"}, int64(-1)},
+		{"missing size", []string{"spec", "leaderWorkerTemplate", "size"}, nil},
+		{"incomplete group", []string{"spec", "leaderWorkerTemplate", "size"}, int64(3)},
 		{"restart policy", []string{"spec", "leaderWorkerTemplate", "restartPolicy"}, "None"},
 		{"hash identity", []string{"spec", "groupIdentity"}, "Hash"},
 	} {
