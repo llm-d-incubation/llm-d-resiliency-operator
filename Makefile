@@ -1,5 +1,4 @@
 # Project configuration
-# TODO: Replace {{PROJECT_NAME}} with your project name
 PROJECT_NAME ?= llm-d-resiliency-operator
 REGISTRY ?= ghcr.io/llm-d-incubation
 IMAGE ?= $(REGISTRY)/$(PROJECT_NAME)
@@ -25,7 +24,7 @@ help: ## Show this help message
 
 .PHONY: build
 build: ## Build the Go binary
-	go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o bin/$(PROJECT_NAME) .
+	go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o bin/$(PROJECT_NAME) ./cmd
 
 .PHONY: test
 test: ## Run tests with race detection
@@ -89,7 +88,7 @@ image-push: ## Build and push multi-arch container image
 	docker buildx build \
 		--platform $(PLATFORMS) \
 		--push \
-		--annotation "index:org.opencontainers.image.source=https://github.com/llm-d/$(PROJECT_NAME)" \
+		--annotation "index:org.opencontainers.image.source=https://github.com/llm-d-incubation/$(PROJECT_NAME)" \
 		--annotation "index:org.opencontainers.image.licenses=Apache-2.0" \
 		--tag $(IMAGE):$(VERSION) \
 		--tag $(IMAGE):latest \
