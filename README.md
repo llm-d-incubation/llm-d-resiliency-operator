@@ -1,20 +1,20 @@
-# {{PROJECT_NAME}}
+# llm-d-resiliency-operator
 
-<!-- TODO: Replace {{PROJECT_NAME}} with your project name -->
-<!-- TODO: Update badges below with correct repo path -->
-
-[![CI](https://github.com/llm-d/{{PROJECT_NAME}}/actions/workflows/ci-pr-checks.yaml/badge.svg)](https://github.com/llm-d/{{PROJECT_NAME}}/actions/workflows/ci-pr-checks.yaml)
+[![CI](https://github.com/llm-d-incubation/llm-d-resiliency-operator/actions/workflows/ci-pr-checks.yaml/badge.svg)](https://github.com/llm-d-incubation/llm-d-resiliency-operator/actions/workflows/ci-pr-checks.yaml)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-> **One-line description of what this project does.**
+The llm-d Inference Resilience Operator (IRO) automatically coordinates hardware
+fault events with the inference engine, sequencing the right engine-side response
+and infrastructure-side recovery action to minimize serving interruption and
+restore full capacity without manual intervention.
 
 ## Overview
 
-<!-- TODO: Describe what this project does, why it exists, and how it fits into the llm-d ecosystem -->
+Please refer to the [WIP design doc](https://docs.google.com/document/d/1q4V2CcWMSrufy5LJE_Fv49kwCoFoPSTrBrrayzNxRqY/edit?usp=sharing) and [proposal](https://github.com/llm-d/llm-d/blob/main/docs/proposals/inference-resilience-operator.md)
 
 ## Prerequisites
 
-- Go 1.24+
+- Go 1.25+
 - Docker (for container builds)
 - [pre-commit](https://pre-commit.com/) (for local development)
 
@@ -22,8 +22,8 @@
 
 ```bash
 # Clone the repo
-git clone https://github.com/llm-d/{{PROJECT_NAME}}.git
-cd {{PROJECT_NAME}}
+git clone https://github.com/llm-d-incubation/llm-d-resiliency-operator.git
+cd llm-d-resiliency-operator
 
 # Install pre-commit hooks
 pre-commit install
@@ -36,6 +36,17 @@ make test
 
 # Run linters
 make lint
+```
+
+Running locally with current shell's kubeconfig:
+```bash
+go run cmd/main.go --pod-namespace=llm-d-wide-ep --pod-label-key=llm-d.ai/inference-serving
+```
+
+This requires that an llm-d inference engine is running in the specified namespace and has the specified label.
+It also requires the RecoveryRequest CRD to be installed:
+```bash
+kubectl apply -f deploy/kubernetes/crd.yaml
 ```
 
 ## Development
@@ -56,7 +67,7 @@ make pre-commit     # Run pre-commit hooks
 
 ## Architecture
 
-<!-- TODO: Add architecture overview, diagrams, or links to design docs -->
+Please refer to the [WIP design doc](https://docs.google.com/document/d/1q4V2CcWMSrufy5LJE_Fv49kwCoFoPSTrBrrayzNxRqY/edit?usp=sharing).
 
 ## Configuration
 

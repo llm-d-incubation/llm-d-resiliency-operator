@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: llm-d-resiliency-operator
+  namespace: default
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: llm-d-resiliency-operator-role
+rules:
+- apiGroups: ["inference.llm-d.io"]
+  resources: ["recoveryrequests"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["inference.llm-d.io"]
+  resources: ["recoveryrequests/status"]
+  verbs: ["get", "update", "patch"]
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: llm-d-resiliency-operator-rolebinding
+subjects:
+- kind: ServiceAccount
+  name: llm-d-resiliency-operator
+  namespace: default
+roleRef:
+  kind: ClusterRole
+  name: llm-d-resiliency-operator-role
+  apiGroup: rbac.authorization.k8s.io
