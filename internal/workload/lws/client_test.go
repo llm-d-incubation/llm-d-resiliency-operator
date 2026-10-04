@@ -1,0 +1,621 @@
+// Copyright 2026 The llm-d Authors.
+// SPDX-License-Identifier: Apache-2.0
+
+package lws_test
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"slices"
+	"strconv"
+	"sync/atomic"
+	"testing"
+
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	"github.com/llm-d-incubation/llm-d-resiliency-operator/internal/engine"
+	"github.com/llm-d-incubation/llm-d-resiliency-operator/internal/workload/lws"
+)
+
+func fixture(t *testing.T) (client.Client, lws.Config) {
+	t.Helper()
+	scheme := runtime.NewScheme()
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	set := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "leaderworkerset.x-k8s.io/v1", "kind": "LeaderWorkerSet",
+		"metadata": map[string]any{"namespace": "test", "name": "model", "uid": "set-uid"},
+		"spec": map[string]any{
+			"replicas": int64(1), "leaderWorkerTemplate": map[string]any{
+				"size": int64(2), "restartPolicy": "RecreateGroupOnPodRestart",
+			},
+		},
+	}}
+	objects := make([]client.Object, 0, 3)
+	objects = append(objects, set)
+	for index, name := range []string{"model-0", "model-0-1"} {
+		objects = append(objects, &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: name, Namespace: "test", UID: types.UID(name + "-uid"),
+				Labels: map[string]string{
+					"leaderworkerset.sigs.k8s.io/name":         "model",
+					"leaderworkerset.sigs.k8s.io/group-index":  "0",
+					"leaderworkerset.sigs.k8s.io/worker-index": fmt.Sprint(index),
+				},
+			},
+			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "engine"}}},
+			Status: corev1.PodStatus{
+				PodIP: fmt.Sprintf("10.0.0.%d", index+1),
+				ContainerStatuses: []corev1.ContainerStatus{{
+					Name: "engine", ContainerID: name + "-container",
+					State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
+				}},
+			},
+		})
+	}
+	return fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build(), lws.Config{
+		Namespace: "test", Name: "model",
+	}
+}
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (transport roundTripperFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return transport(request)
+}
+
+func observerPayload(t *testing.T, request *http.Request, localRanks ...int) map[string]any {
+	t.Helper()
+	worker, err := strconv.Atoi(request.URL.Query().Get("pod_ip")[len("10.0.0."):])
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker--
+	name := "model-0"
+	if worker > 0 {
+		name += "-" + strconv.Itoa(worker)
+	}
+	count := 2
+	if len(localRanks) != 0 {
+		count = localRanks[0]
+	}
+	ranks := make([]map[string]any, count)
+	for local := range count {
+		ranks[local] = map[string]any{"id": worker*count + local}
+	}
+	return map[string]any{
+		"schema_version": 1, "pod_uid": name + "-uid",
+		"ranks": ranks,
+	}
+}
+
+func observerHTTPClient(t *testing.T, handler http.HandlerFunc) *http.Client {
+	t.Helper()
+	if handler == nil {
+		handler = func(writer http.ResponseWriter, request *http.Request) {
+			if err := json.NewEncoder(writer).Encode(observerPayload(t, request)); err != nil {
+				t.Error(err)
+			}
+		}
+	}
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	address, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		mapped := request.Clone(request.Context())
+		mapped.URL.Scheme, mapped.URL.Host = address.Scheme, address.Host
+		mapped.URL.RawQuery = url.Values{"pod_ip": []string{request.URL.Hostname()}}.Encode()
+		return http.DefaultTransport.RoundTrip(mapped)
+	})}
+}
+
+func newWorkload(t *testing.T, api client.Client, config lws.Config) *lws.Client {
+	t.Helper()
+	workload, err := lws.New(api, api, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workload.HTTPClient = observerHTTPClient(t, nil)
+	return workload
+}
+
+func discover(t *testing.T, workload *lws.Client) engine.Group {
+	t.Helper()
+	group, err := workload.Discover(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return group
+}
+
+func TestDiscover(t *testing.T) {
+	t.Parallel()
+	api, config := fixture(t)
+	workload := newWorkload(t, api, config)
+	group := discover(t, workload)
+	if group.ID == "" || len(group.Endpoints) != 4 {
+		t.Fatalf("unexpected group: %+v", group)
+	}
+	identities := []string{
+		"set-uid", "model-0-uid", "model-0-uid/engine/model-0-container/0",
+		"model-0-1-uid", "model-0-1-uid/engine/model-0-1-container/0",
+	}
+	slices.Sort(identities)
+	identity, err := json.Marshal(identities)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if group.ID != fmt.Sprintf("%x", sha256.Sum256(identity)) {
+		t.Fatal("discovery changed the persisted Pod/container group identity algorithm")
+	}
+	for rank, endpoint := range group.Endpoints {
+		wantURL := fmt.Sprintf("http://10.0.0.%d:%d", rank/2+1, 8000+rank%2)
+		if endpoint.Rank != rank || endpoint.URL != wantURL || endpoint.PodUID == "" || endpoint.DiagnosticsURL == "" {
+			t.Fatalf("unexpected endpoint: %+v", endpoint)
+		}
+	}
+	if next := discover(t, workload); next.ID != group.ID {
+		t.Fatal("unchanged workload changed identity")
+	}
+	var pod corev1.Pod
+	if err := api.Get(t.Context(), client.ObjectKey{Namespace: "test", Name: "model-0-1"}, &pod); err != nil {
+		t.Fatal(err)
+	}
+	pod.Status.ContainerStatuses[0].RestartCount++
+	if err := api.Status().Update(t.Context(), &pod); err != nil {
+		t.Fatal(err)
+	}
+	if next := discover(t, workload); next.ID == group.ID {
+		t.Fatal("container restart did not change group identity")
+	}
+}
+
+func TestConfiguration(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name   string
+		mutate func(*lws.Config)
+	}{
+		{"namespace", func(config *lws.Config) { config.Namespace = "" }},
+		{"port range", func(config *lws.Config) { config.BasePort = 65536 }},
+		{"observer port", func(config *lws.Config) { config.ObserverPort = -1 }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			api, config := fixture(t)
+			test.mutate(&config)
+			if _, err := lws.New(api, api, config); err == nil {
+				t.Fatal("invalid configuration accepted")
+			}
+		})
+	}
+}
+
+func TestDiscoverDifferentLocalRankCounts(t *testing.T) {
+	t.Parallel()
+	for _, count := range []int{1, 3, 5} {
+		t.Run(strconv.Itoa(count), func(t *testing.T) {
+			t.Parallel()
+			api, config := fixture(t)
+			workload := newWorkload(t, api, config)
+			workload.HTTPClient = observerHTTPClient(t, func(writer http.ResponseWriter, request *http.Request) {
+				if err := json.NewEncoder(writer).Encode(observerPayload(t, request, count)); err != nil {
+					t.Error(err)
+				}
+			})
+			group := discover(t, workload)
+			if len(group.Endpoints) != 2*count {
+				t.Fatalf("wrong discovered rank count: %+v", group)
+			}
+			for rank, endpoint := range group.Endpoints {
+				wantURL := fmt.Sprintf("http://10.0.0.%d:%d", rank/count+1, 8000+rank%count)
+				if endpoint.Rank != rank || endpoint.URL != wantURL {
+					t.Fatalf("wrong original-rank endpoint: %+v", endpoint)
+				}
+			}
+		})
+	}
+}
+
+func TestDiscoverRejectsInvalidObserverMetadata(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name   string
+		mutate func(map[string]any)
+	}{
+		{"schema version", func(payload map[string]any) { payload["schema_version"] = 2 }},
+		{"stale Pod UID", func(payload map[string]any) { payload["pod_uid"] = "old-pod" }},
+		{"missing ranks", func(payload map[string]any) { delete(payload, "ranks") }},
+		{"empty ranks", func(payload map[string]any) { payload["ranks"] = []map[string]any{} }},
+		{"missing rank ID", func(payload map[string]any) { payload["ranks"] = []map[string]any{{}, {"id": 1}} }},
+		{"duplicate ranks", func(payload map[string]any) { payload["ranks"] = []map[string]any{{"id": 0}, {"id": 0}} }},
+		{"noncontiguous ranks", func(payload map[string]any) { payload["ranks"] = []map[string]any{{"id": 0}, {"id": 2}} }},
+		{"negative rank", func(payload map[string]any) { payload["ranks"] = []map[string]any{{"id": -1}, {"id": 0}} }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			api, config := fixture(t)
+			workload := newWorkload(t, api, config)
+			workload.HTTPClient = observerHTTPClient(t, func(writer http.ResponseWriter, request *http.Request) {
+				payload := observerPayload(t, request)
+				test.mutate(payload)
+				if err := json.NewEncoder(writer).Encode(payload); err != nil {
+					t.Error(err)
+				}
+			})
+			if _, err := workload.Discover(t.Context()); err == nil {
+				t.Fatal("invalid observer metadata accepted")
+			}
+		})
+	}
+}
+
+func TestDiscoverRejectsWrongRankLayout(t *testing.T) {
+	t.Parallel()
+	for _, ranks := range [][]map[string]any{
+		{{"id": 2}},
+		{{"id": 0}, {"id": 1}},
+	} {
+		t.Run(fmt.Sprint(ranks), func(t *testing.T) {
+			t.Parallel()
+			api, config := fixture(t)
+			workload := newWorkload(t, api, config)
+			workload.HTTPClient = observerHTTPClient(t, func(writer http.ResponseWriter, request *http.Request) {
+				payload := observerPayload(t, request)
+				if request.URL.Query().Get("pod_ip") == "10.0.0.2" {
+					payload["ranks"] = ranks
+				}
+				if err := json.NewEncoder(writer).Encode(payload); err != nil {
+					t.Error(err)
+				}
+			})
+			if _, err := workload.Discover(t.Context()); err == nil {
+				t.Fatal("nonuniform counts or wrong worker offset accepted")
+			}
+		})
+	}
+	api, config := fixture(t)
+	config.BasePort = 65535
+	if _, err := newWorkload(t, api, config).Discover(t.Context()); err == nil {
+		t.Fatal("discovered rank count exceeds API port range")
+	}
+}
+
+func TestDiscoverPreservesOriginalRanksAfterExclusion(t *testing.T) {
+	t.Parallel()
+	api, config := fixture(t)
+	workload := newWorkload(t, api, config)
+	workload.HTTPClient = observerHTTPClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		payload := observerPayload(t, request)
+		ranks, ok := payload["ranks"].([]map[string]any)
+		if !ok {
+			t.Error("unexpected observer fixture ranks")
+			return
+		}
+		for _, rank := range ranks {
+			rank["engine_dead"] = rank["id"] == 1
+		}
+		if err := json.NewEncoder(writer).Encode(payload); err != nil {
+			t.Error(err)
+		}
+	})
+	group := discover(t, workload)
+	if len(group.Endpoints) != 4 || group.Endpoints[1].Rank != 1 || group.Endpoints[3].Rank != 3 {
+		t.Fatalf("process loss changed original membership: %+v", group)
+	}
+}
+
+func TestDiscoveryCachesOnlyValidatedIdentity(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name   string
+		mutate func(*corev1.Pod)
+	}{
+		{"Pod replacement", func(pod *corev1.Pod) { pod.UID = "replacement-pod" }},
+		{"container replacement", func(pod *corev1.Pod) { pod.Status.ContainerStatuses[0].ContainerID = "replacement-container" }},
+		{"container restart", func(pod *corev1.Pod) { pod.Status.ContainerStatuses[0].RestartCount++ }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			api, config := fixture(t)
+			workload := newWorkload(t, api, config)
+			var unavailable atomic.Bool
+			var calls atomic.Int32
+			workload.HTTPClient = observerHTTPClient(t, func(writer http.ResponseWriter, request *http.Request) {
+				calls.Add(1)
+				if unavailable.Load() {
+					writer.WriteHeader(http.StatusServiceUnavailable)
+					return
+				}
+				if err := json.NewEncoder(writer).Encode(observerPayload(t, request)); err != nil {
+					t.Error(err)
+				}
+			})
+			unavailable.Store(true)
+			if _, err := workload.Discover(t.Context()); err == nil {
+				t.Fatal("first discovery succeeded without observer metadata")
+			}
+			unavailable.Store(false)
+			original := discover(t, workload)
+			requests := calls.Load()
+			original.Endpoints[0].Rank = 999
+			unavailable.Store(true)
+			cached := discover(t, workload)
+			if cached.ID != original.ID || cached.Endpoints[0].Rank != 0 || calls.Load() != requests {
+				t.Fatal("validated unchanged identity did not reuse an independent layout snapshot")
+			}
+			var pod corev1.Pod
+			if err := api.Get(t.Context(), client.ObjectKey{Namespace: "test", Name: "model-0"}, &pod); err != nil {
+				t.Fatal(err)
+			}
+			test.mutate(&pod)
+			status := pod.Status.DeepCopy()
+			if err := api.Update(t.Context(), &pod); err != nil {
+				t.Fatal(err)
+			}
+			pod.Status = *status
+			if err := api.Status().Update(t.Context(), &pod); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := workload.Discover(t.Context()); err == nil || calls.Load() == requests {
+				t.Fatal("new Pod/container identity reused stale original-rank metadata")
+			}
+		})
+	}
+}
+
+func TestDiscoverRefreshesAddressesWithoutChangingGroupIdentity(t *testing.T) {
+	t.Parallel()
+	api, config := fixture(t)
+	workload := newWorkload(t, api, config)
+	var unavailable atomic.Bool
+	workload.HTTPClient = observerHTTPClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		if unavailable.Load() {
+			writer.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		if request.URL.Query().Get("pod_ip") == "10.0.0.7" {
+			request.URL.RawQuery = url.Values{"pod_ip": []string{"10.0.0.1"}}.Encode()
+		}
+		if err := json.NewEncoder(writer).Encode(observerPayload(t, request)); err != nil {
+			t.Error(err)
+		}
+	})
+	original := discover(t, workload)
+	var pod corev1.Pod
+	if err := api.Get(t.Context(), client.ObjectKey{Namespace: "test", Name: "model-0"}, &pod); err != nil {
+		t.Fatal(err)
+	}
+	pod.Status.PodIP = "10.0.0.7"
+	if err := api.Status().Update(t.Context(), &pod); err != nil {
+		t.Fatal(err)
+	}
+	unavailable.Store(true)
+	if _, err := workload.Discover(t.Context()); err == nil {
+		t.Fatal("changed address reused stale endpoints without observer validation")
+	}
+	unavailable.Store(false)
+	current := discover(t, workload)
+	if current.ID != original.ID || current.Endpoints[0].URL != "http://10.0.0.7:8000" {
+		t.Fatalf("address refresh changed Pod/container identity or kept stale endpoints: %+v", current)
+	}
+}
+
+func TestDiscoverReadsCurrentLWSGroupSize(t *testing.T) {
+	t.Parallel()
+	for _, size := range []int{1, 3} {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			t.Parallel()
+			api, config := fixture(t)
+			workload := newWorkload(t, api, config)
+			original := discover(t, workload)
+			set := &unstructured.Unstructured{}
+			set.SetGroupVersionKind(schema.GroupVersionKind{
+				Group: "leaderworkerset.x-k8s.io", Version: "v1", Kind: "LeaderWorkerSet",
+			})
+			if err := api.Get(t.Context(), client.ObjectKey{Namespace: "test", Name: "model"}, set); err != nil {
+				t.Fatal(err)
+			}
+			if err := unstructured.SetNestedField(set.Object, int64(size), "spec", "leaderWorkerTemplate", "size"); err != nil {
+				t.Fatal(err)
+			}
+			if err := api.Update(t.Context(), set); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := workload.Discover(t.Context()); err == nil {
+				t.Fatal("discovery accepted a Pod count that disagrees with the current LWS size")
+			}
+			var worker corev1.Pod
+			if err := api.Get(t.Context(), client.ObjectKey{Namespace: "test", Name: "model-0-1"}, &worker); err != nil {
+				t.Fatal(err)
+			}
+			if size == 1 {
+				if err := api.Delete(t.Context(), &worker); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				worker.Name = "model-0-2"
+				worker.UID = "model-0-2-uid"
+				worker.ResourceVersion = ""
+				worker.Labels["leaderworkerset.sigs.k8s.io/worker-index"] = "2"
+				worker.Status.PodIP = "10.0.0.3"
+				worker.Status.ContainerStatuses[0].ContainerID = "model-0-2-container"
+				if err := api.Create(t.Context(), &worker); err != nil {
+					t.Fatal(err)
+				}
+			}
+			group := discover(t, workload)
+			if len(group.Endpoints) != size*2 || group.ID == original.ID {
+				t.Fatalf("discovery did not follow the current LWS size: %+v", group)
+			}
+			for rank, endpoint := range group.Endpoints {
+				wantURL := fmt.Sprintf("http://10.0.0.%d:%d", rank/2+1, 8000+rank%2)
+				if endpoint.Rank != rank || endpoint.URL != wantURL {
+					t.Fatalf("incorrect original-rank endpoint: %+v", endpoint)
+				}
+			}
+		})
+	}
+}
+
+func TestDiscoverRejectsInvalidTopology(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name  string
+		field []string
+		value any
+	}{
+		{"replicas", []string{"spec", "replicas"}, int64(2)},
+		{"zero size", []string{"spec", "leaderWorkerTemplate", "size"}, int64(0)},
+		{"negative size", []string{"spec", "leaderWorkerTemplate", "size"}, int64(-1)},
+		{"missing size", []string{"spec", "leaderWorkerTemplate", "size"}, nil},
+		{"incomplete group", []string{"spec", "leaderWorkerTemplate", "size"}, int64(3)},
+		{"restart policy", []string{"spec", "leaderWorkerTemplate", "restartPolicy"}, "None"},
+		{"hash identity", []string{"spec", "groupIdentity"}, "Hash"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			api, config := fixture(t)
+			set := &unstructured.Unstructured{}
+			set.SetGroupVersionKind(schema.GroupVersionKind{Group: "leaderworkerset.x-k8s.io", Version: "v1", Kind: "LeaderWorkerSet"})
+			if err := api.Get(t.Context(), client.ObjectKey{Namespace: "test", Name: "model"}, set); err != nil {
+				t.Fatal(err)
+			}
+			if err := unstructured.SetNestedField(set.Object, test.value, test.field...); err != nil {
+				t.Fatal(err)
+			}
+			if err := api.Update(t.Context(), set); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := newWorkload(t, api, config).Discover(t.Context()); err == nil {
+				t.Fatal("invalid topology accepted")
+			}
+		})
+	}
+}
+
+func TestDiscoveryRequiresNativeIdentity(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name   string
+		mutate func(*corev1.Pod)
+	}{
+		{"other set", func(pod *corev1.Pod) { pod.Labels["leaderworkerset.sigs.k8s.io/name"] = "other" }},
+		{"other group", func(pod *corev1.Pod) { pod.Labels["leaderworkerset.sigs.k8s.io/group-index"] = "1" }},
+		{"duplicate rank", func(pod *corev1.Pod) { pod.Labels["leaderworkerset.sigs.k8s.io/worker-index"] = "0" }},
+		{"missing container", func(pod *corev1.Pod) { pod.Status.ContainerStatuses = nil }},
+		{"exited container", func(pod *corev1.Pod) { pod.Status.ContainerStatuses[0].State = corev1.ContainerState{} }},
+		{"missing address", func(pod *corev1.Pod) { pod.Status.PodIP = "" }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			api, config := fixture(t)
+			var pod corev1.Pod
+			if err := api.Get(t.Context(), client.ObjectKey{Namespace: "test", Name: "model-0-1"}, &pod); err != nil {
+				t.Fatal(err)
+			}
+			test.mutate(&pod)
+			status := pod.Status.DeepCopy()
+			if err := api.Update(t.Context(), &pod); err != nil {
+				t.Fatal(err)
+			}
+			pod.Status = *status
+			if err := api.Status().Update(t.Context(), &pod); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := newWorkload(t, api, config).Discover(t.Context()); err == nil {
+				t.Fatal("invalid Pod accepted")
+			}
+		})
+	}
+}
+
+type guardedClient struct {
+	client.Client
+	uid   types.UID
+	calls int
+}
+
+func (api *guardedClient) Delete(ctx context.Context, object client.Object, options ...client.DeleteOption) error {
+	settings := (&client.DeleteOptions{}).ApplyOptions(options)
+	if settings.Preconditions == nil || settings.Preconditions.UID == nil {
+		return fmt.Errorf("missing UID precondition")
+	}
+	api.calls++
+	if *settings.Preconditions.UID != api.uid {
+		return apierrors.NewConflict(schema.GroupResource{Resource: "pods"}, object.GetName(), fmt.Errorf("UID changed"))
+	}
+	return api.Client.Delete(ctx, object, options...)
+}
+
+func TestResetUsesOldLeaderUID(t *testing.T) {
+	t.Parallel()
+	base, config := fixture(t)
+	api := &guardedClient{Client: base, uid: "model-0-uid"}
+	workload := newWorkload(t, api, config)
+	group := discover(t, workload)
+	group.Endpoints[0].PodUID = "previous-uid"
+	if err := workload.Reset(t.Context(), group); err != nil {
+		t.Fatal(err)
+	}
+	if next := discover(t, workload); next.ID == "" {
+		t.Fatal("stale reset deleted replacement")
+	}
+	group.Endpoints[0].PodUID = string(api.uid)
+	if err := workload.Reset(t.Context(), group); err != nil {
+		t.Fatal(err)
+	}
+	if err := workload.Reset(t.Context(), group); err != nil {
+		t.Fatalf("missing leader should be a no-op: %v", err)
+	}
+	group.Endpoints[0].Pod = "other"
+	if err := workload.Reset(t.Context(), group); err == nil || api.calls != 3 {
+		t.Fatal("unexpected leader was not rejected before deletion")
+	}
+}
+
+func TestStateConflicts(t *testing.T) {
+	t.Parallel()
+	api, config := fixture(t)
+	first, second := newWorkload(t, api, config), newWorkload(t, api, config)
+	for _, workload := range []*lws.Client{first, second} {
+		if data, err := workload.Load(t.Context()); err != nil || len(data) != 0 {
+			t.Fatalf("initial load: %s, %v", data, err)
+		}
+	}
+	if err := first.Save(t.Context(), []byte("first")); err != nil {
+		t.Fatal(err)
+	}
+	if err := second.Save(t.Context(), []byte("stale create")); !apierrors.IsAlreadyExists(err) {
+		t.Fatalf("expected create conflict, got %v", err)
+	}
+	if data, err := second.Load(t.Context()); err != nil || string(data) != "first" {
+		t.Fatalf("load: %s, %v", data, err)
+	}
+	if err := first.Save(t.Context(), []byte("newer")); err != nil {
+		t.Fatal(err)
+	}
+	if err := second.Save(t.Context(), []byte("stale update")); !apierrors.IsConflict(err) {
+		t.Fatalf("expected version conflict, got %v", err)
+	}
+	if data, err := second.Load(t.Context()); err != nil || string(data) != "newer" {
+		t.Fatalf("newer state overwritten: %s, %v", data, err)
+	}
+}

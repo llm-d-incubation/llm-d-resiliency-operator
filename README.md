@@ -14,7 +14,7 @@ Please refer to the [WIP design doc](https://docs.google.com/document/d/1q4V2CcW
 
 ## Prerequisites
 
-- Go 1.24+
+- Go 1.25+
 - Docker (for container builds)
 - [pre-commit](https://pre-commit.com/) (for local development)
 
@@ -68,6 +68,15 @@ make pre-commit     # Run pre-commit hooks
 ## Architecture
 
 Please refer to the [WIP design doc](https://docs.google.com/document/d/1q4V2CcWMSrufy5LJE_Fv49kwCoFoPSTrBrrayzNxRqY/edit?usp=sharing).
+
+### vLLM EngineAdapter
+
+The opt-in adapter handles engine faults while LWS Pods remain running. It retries
+usable ranks or excludes failed ranks, verifies inference, and resets the group
+when in-place FT cannot complete. RecoveryRequest behavior is unchanged.
+
+See the [deployment example](deploy/vllm-ft/README.md) and
+[runtime bridge](runtime/vllm/README.md).
 
 ## Configuration
 

@@ -1,0 +1,44 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: iro-vllm-ft
+  namespace: default
+rules:
+- apiGroups: [leaderworkerset.x-k8s.io]
+  resources: [leaderworkersets]
+  resourceNames: [wide-ep]
+  verbs: [get]
+- apiGroups: [""]
+  resources: [pods]
+  verbs: [get, list]
+- apiGroups: [""]
+  resources: [pods]
+  resourceNames: [wide-ep-0]
+  verbs: [delete]
+- apiGroups: [""]
+  resources: [configmaps]
+  resourceNames: [wide-ep-ft-state]
+  verbs: [get, update]
+- apiGroups: [""]
+  resources: [configmaps]
+  verbs: [create]
+- apiGroups: [coordination.k8s.io]
+  resources: [leases]
+  verbs: [get, list, watch, create, update, patch]
+- apiGroups: [""]
+  resources: [events]
+  verbs: [create, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: iro-vllm-ft
+  namespace: default
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: iro-vllm-ft
+subjects:
+- kind: ServiceAccount
+  name: llm-d-resiliency-operator
+  namespace: default
