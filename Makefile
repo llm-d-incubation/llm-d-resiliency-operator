@@ -1,7 +1,6 @@
 # Project configuration
-# TODO: Replace {{PROJECT_NAME}} with your project name
-PROJECT_NAME ?= {{PROJECT_NAME}}
-REGISTRY ?= ghcr.io/llm-d
+PROJECT_NAME ?= llm-d-resiliency-operator
+REGISTRY ?= ghcr.io/llm-d-incubation
 IMAGE ?= $(REGISTRY)/$(PROJECT_NAME)
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 PLATFORMS ?= linux/amd64,linux/arm64
@@ -89,7 +88,7 @@ image-push: ## Build and push multi-arch container image
 	docker buildx build \
 		--platform $(PLATFORMS) \
 		--push \
-		--annotation "index:org.opencontainers.image.source=https://github.com/llm-d/$(PROJECT_NAME)" \
+		--annotation "index:org.opencontainers.image.source=https://github.com/llm-d-incubation/$(PROJECT_NAME)" \
 		--annotation "index:org.opencontainers.image.licenses=Apache-2.0" \
 		--tag $(IMAGE):$(VERSION) \
 		--tag $(IMAGE):latest \
