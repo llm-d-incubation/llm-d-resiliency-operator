@@ -1,8 +1,9 @@
-# TODO: Replace with your team's GitHub usernames
 # See https://go.k8s.io/owners for format documentation
 
-reviewers:
-  # - github-username
-
 approvers:
-  # - github-username
+  - almogtavor
+  - Etelis
+
+reviewers:
+  - almogtavor
+  - Etelis

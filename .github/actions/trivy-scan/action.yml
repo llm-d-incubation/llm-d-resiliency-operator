@@ -4,7 +4,7 @@ description: Scan container image for HIGH and CRITICAL vulnerabilities
 inputs:
   image:
     required: true
-    description: Container image to scan (e.g., ghcr.io/llm-d/my-project:v0.1.0)
+    description: Container image to scan (e.g., ghcr.io/llm-d-incubation/llm-d-resiliency-operator:v0.1.0)
   severity:
     required: false
     description: Severity levels to report

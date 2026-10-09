@@ -50,4 +50,4 @@ jobs:
       - name: Trivy security scan
         uses: ./.github/actions/trivy-scan
         with:
-          image: ghcr.io/llm-d/${{ steps.meta.outputs.project_name }}:${{ steps.tag.outputs.tag }}
+          image: ghcr.io/llm-d-incubation/${{ steps.meta.outputs.project_name }}:${{ steps.tag.outputs.tag }}

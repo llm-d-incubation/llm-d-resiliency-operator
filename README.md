@@ -1,16 +1,15 @@
-# {{PROJECT_NAME}}
+# llm-d Resiliency Operator
 
-<!-- TODO: Replace {{PROJECT_NAME}} with your project name -->
-<!-- TODO: Update badges below with correct repo path -->
-
-[![CI](https://github.com/llm-d/{{PROJECT_NAME}}/actions/workflows/ci-pr-checks.yaml/badge.svg)](https://github.com/llm-d/{{PROJECT_NAME}}/actions/workflows/ci-pr-checks.yaml)
+[![CI](https://github.com/llm-d-incubation/llm-d-resiliency-operator/actions/workflows/ci-pr-checks.yaml/badge.svg)](https://github.com/llm-d-incubation/llm-d-resiliency-operator/actions/workflows/ci-pr-checks.yaml)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-> **One-line description of what this project does.**
+> **A Kubernetes operator that detects and recovers from failures in llm-d inference workloads.**
 
 ## Overview
 
-<!-- TODO: Describe what this project does, why it exists, and how it fits into the llm-d ecosystem -->
+The llm-d Resiliency Operator (IRO) watches llm-d inference deployments and reacts when serving degrades, so a multi-node model server can get back to healthy without a human in the loop.
+
+This project is in early development under [llm-d-incubation](https://github.com/llm-d-incubation). See the [llm-d project](https://github.com/llm-d/llm-d) for how it fits into the wider stack.
 
 ## Prerequisites
 
@@ -22,8 +21,8 @@
 
 ```bash
 # Clone the repo
-git clone https://github.com/llm-d/{{PROJECT_NAME}}.git
-cd {{PROJECT_NAME}}
+git clone https://github.com/llm-d-incubation/llm-d-resiliency-operator.git
+cd llm-d-resiliency-operator
 
 # Install pre-commit hooks
 pre-commit install
@@ -53,14 +52,6 @@ make fmt            # Format Go and Python code
 make image-build    # Build multi-arch container image
 make pre-commit     # Run pre-commit hooks
 ```
-
-## Architecture
-
-<!-- TODO: Add architecture overview, diagrams, or links to design docs -->
-
-## Configuration
-
-<!-- TODO: Document configuration options, environment variables, CLI flags -->
 
 ## Contributing
 
