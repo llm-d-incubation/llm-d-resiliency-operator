@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="website/static/img/llm-d-logo-transparent.png" alt="llm-d Resiliency Operator" width="70%"/>
+<img src="website/static/img/llm-d-logo-transparent.png" alt="llm-d Resiliency Operator" width="50%"/>
 
 <p>A Kubernetes operator that detects and recovers from failures in llm-d inference workloads.</p>
 
