@@ -1,9 +1,13 @@
-# llm-d Resiliency Operator
+<div align="center">
+
+<img src="website/static/img/llm-d-logo-transparent.png" alt="llm-d Resiliency Operator" width="50%"/>
+
+<p>A Kubernetes operator that detects and recovers from failures in llm-d inference workloads.</p>
 
 [![CI](https://github.com/llm-d-incubation/llm-d-resiliency-operator/actions/workflows/ci-pr-checks.yaml/badge.svg)](https://github.com/llm-d-incubation/llm-d-resiliency-operator/actions/workflows/ci-pr-checks.yaml)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-> **A Kubernetes operator that detects and recovers from failures in llm-d inference workloads.**
+</div>
 
 ## Overview
 
