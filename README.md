@@ -41,17 +41,6 @@ make test
 make lint
 ```
 
-Running locally with current shell's kubeconfig:
-```bash
-go run cmd/main.go --pod-namespace=llm-d-wide-ep --pod-label-key=llm-d.ai/inference-serving
-```
-
-This requires that an llm-d inference engine is running in the specified namespace and has the specified label.
-It also requires the RecoveryRequest CRD to be installed:
-```bash
-kubectl apply -f deploy/kubernetes/crd.yaml
-```
-
 ## Development
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines, coding standards, and how to submit changes.
