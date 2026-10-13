@@ -14,7 +14,7 @@ inputs:
   registry:
     required: false
     description: Container registry
-    default: ghcr.io/llm-d
+    default: ghcr.io/llm-d-incubation
   platforms:
     required: false
     description: Target platforms

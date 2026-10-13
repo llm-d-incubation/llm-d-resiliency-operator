@@ -20,6 +20,7 @@ type Config struct {
 	DiagnosisTimeout time.Duration
 	ApplyTimeout     time.Duration
 	VerifyTimeout    time.Duration
+	UnseenTimeout    time.Duration
 	FlapWindow       time.Duration
 	CapacityRestore  CapacityRestore
 }
@@ -65,15 +66,15 @@ type Record struct {
 	Pods    map[string]PodRecord            `json:"pods"`
 	Members map[engine.MemberID]MemberState `json:"members"`
 
-	Round       *engine.Round       `json:"round,omitempty"`
-	RoundSince  time.Time           `json:"round_since,omitzero"`
-	Acceptances []engine.Acceptance `json:"acceptances,omitempty"`
-	Verifying   []engine.MemberID   `json:"verifying,omitempty"`
+	Reconfig      *engine.Reconfig    `json:"reconfig,omitempty"`
+	ReconfigSince time.Time           `json:"reconfig_since,omitzero"`
+	Acceptances   []engine.Acceptance `json:"acceptances,omitempty"`
+	Verifying     []engine.MemberID   `json:"verifying,omitempty"`
 
-	LastNoChangeRound         time.Time `json:"last_no_change_round,omitzero"`
-	VerifyFailedSince         time.Time `json:"verify_failed_since,omitzero"`
-	DiscoveryUnavailableSince time.Time `json:"discovery_unavailable_since,omitzero"`
-	RecreateStopped           bool      `json:"recreate_stopped,omitempty"`
+	LastNoChangeReconfig time.Time `json:"last_no_change_reconfig,omitzero"`
+	VerifyFailedSince    time.Time `json:"verify_failed_since,omitzero"`
+	UnseenSince          time.Time `json:"unseen_since,omitzero"`
+	RecreateStopped      bool      `json:"recreate_stopped,omitempty"`
 
 	Incident *Incident `json:"incident,omitempty"`
 }

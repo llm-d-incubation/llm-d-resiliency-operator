@@ -10,8 +10,8 @@ import (
 )
 
 type Journal interface {
-	Load(ctx context.Context) ([]byte, error)
-	Save(ctx context.Context, data []byte) error
+	Load(ctx context.Context) (data []byte, version string, err error)
+	Save(ctx context.Context, data []byte, version string) (string, error)
 }
 
 var ErrConflict = errors.New("journal conflict")

@@ -24,34 +24,34 @@ sequenceDiagram
   W-->>C: Group (Pods, Recreating)
   C->>D: Observe(pods)
   D-->>C: Observation (members per Pod, their state)
-  alt a round is in flight
-    C->>P: Progress(observation, round)
-  else no round
+  alt a reconfig is in flight
+    C->>P: Progress(observation, reconfig)
+  else no reconfig
     C->>P: Plan(observation, admitted, candidates)
   end
   opt plan is Change and passes the checks
-    C->>J: Save(round)
-    C->>D: Apply(observation, round)
+    C->>J: Save(reconfig)
+    C->>D: Apply(observation, reconfig)
     C->>J: Save(acceptances)
   end
   opt serving below full
-    C->>W: Reset(failed Pod), ResetAll or Release
+    C->>W: Reset(failed Pods), ResetAll or Release
   end
 ```
 
 | Action | Delivery | Why |
 |---|---|---|
-| Engine round (`Apply`) | at most once. Saved first, never sent again. | a round is not idempotent |
+| Engine reconfig (`Apply`) | saved first. Sent again only if no member got it. | a reconfig is not idempotent |
 | Workload call (`Reset`, `ResetAll`, `Release`) | saved first, repeated until `Discover` shows the result | calls name Pods by UID, so repeating is harmless |
 
 ## From a fault back to full capacity
 
 1. **Remove the dead member** (phase `recovering`). The driver reports `dp3` Terminal. The policy plans
-   `Remove dp3`, the round runs, and the survivors are verified.
+   `Remove dp3`, the reconfig runs, and the survivors are verified.
 2. **Reset the failed Pod** (phase `serving`, 3 members). `lws-0-3` holds only excluded members, so the
    workload resets it. The rest of the group keeps serving.
 3. **Admit the new member.** The new Pod's `dp3` shows up as a candidate. The policy plans `Add dp3`,
-   the round runs, and the group is back to 4 members.
+   the reconfig runs, and the group is back to 4 members.
 
 A new fault at any point comes first: the group goes back to `recovering`, and the capacity work
 continues once it serves again.
@@ -60,4 +60,4 @@ Capacity only comes back by resetting, never from new Pods elsewhere. If the res
 serving with fewer members. `--ft-capacity-restore=reset-all` resets the whole group instead, and
 `release` frees the failed Pod's GPUs.
 
-See the [component contracts](https://github.com/llm-d-incubation/llm-d-resiliency-operator/blob/main/docs/design/contracts/README.md) for the full interfaces.
+See the [component interfaces](https://github.com/llm-d-incubation/llm-d-resiliency-operator/tree/main/internal) for the code.

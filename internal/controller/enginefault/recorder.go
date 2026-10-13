@@ -15,9 +15,9 @@ type Recorder interface {
 	Stepped(record *Record, err error)
 	PhaseChanged(from, to Phase, reason string)
 	IncidentOpened(incident *Incident)
-	RoundStarted(round *engine.Round, plan *engine.Plan)
-	RoundFinished(round *engine.Round, progress engine.Progress)
-	PodResetRequested(pod workload.PodRef, err error)
+	ReconfigStarted(reconfig *engine.Reconfig, plan *engine.Plan)
+	ReconfigFinished(reconfig *engine.Reconfig, progress engine.Progress)
+	PodResetRequested(pods []workload.PodRef, err error)
 	ResetAllRequested(reason ResetReason, pods []workload.PodRef)
 	ReleaseRequested(pods []workload.PodRef, err error)
 	SaveFailed(err error)
@@ -33,13 +33,13 @@ type Incident struct {
 	Affected  []engine.MemberID `json:"affected,omitempty"`
 	Pods      []workload.PodRef `json:"pods,omitempty"`
 	Nodes     []string          `json:"nodes,omitempty"`
-	Rounds    []RoundResult     `json:"rounds,omitempty"`
+	Reconfigs []ReconfigResult  `json:"reconfigs,omitempty"`
 	Outcome   Outcome           `json:"outcome,omitempty"`
 	Durations Durations         `json:"durations"`
 }
 
-type RoundResult struct {
-	Round    engine.Round    `json:"round"`
+type ReconfigResult struct {
+	Reconfig engine.Reconfig `json:"reconfig"`
 	Progress engine.Progress `json:"progress"`
 }
 
@@ -63,11 +63,12 @@ type ResetReason string
 
 const (
 	ResetUnrecoverable     ResetReason = "unrecoverable"
-	ResetRoundFailed       ResetReason = "round_failed"
+	ResetReconfigFailed    ResetReason = "reconfig_failed"
 	ResetDiagnosisDeadline ResetReason = "diagnosis_deadline"
 	ResetApplyDeadline     ResetReason = "apply_deadline"
 	ResetFlap              ResetReason = "flap"
 	ResetVerifyFailed      ResetReason = "verify_failed"
 	ResetExclusionBroken   ResetReason = "exclusion_broken"
 	ResetCapacity          ResetReason = "capacity"
+	ResetUnseen            ResetReason = "unseen"
 )

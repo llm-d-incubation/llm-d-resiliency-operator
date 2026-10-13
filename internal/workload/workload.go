@@ -11,7 +11,7 @@ import (
 
 type Workload interface {
 	Discover(ctx context.Context) (Group, error)
-	Reset(ctx context.Context, pod PodRef) error
+	Reset(ctx context.Context, pods []PodRef) error
 	ResetAll(ctx context.Context, pods []PodRef) error
 	Release(ctx context.Context, pods []PodRef) error
 }
