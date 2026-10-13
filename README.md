@@ -1,20 +1,23 @@
-# llm-d-resiliency-operator
+<div align="center">
+
+<img src="website/static/img/llm-d-logo-transparent.png" alt="llm-d Resiliency Operator" width="50%"/>
+
+<p>A Kubernetes operator that detects and recovers from failures in llm-d inference workloads.</p>
 
 [![CI](https://github.com/llm-d-incubation/llm-d-resiliency-operator/actions/workflows/ci-pr-checks.yaml/badge.svg)](https://github.com/llm-d-incubation/llm-d-resiliency-operator/actions/workflows/ci-pr-checks.yaml)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-The llm-d Inference Resilience Operator (IRO) automatically coordinates hardware
-fault events with the inference engine, sequencing the right engine-side response
-and infrastructure-side recovery action to minimize serving interruption and
-restore full capacity without manual intervention.
+</div>
 
 ## Overview
 
-Please refer to the [WIP design doc](https://docs.google.com/document/d/1q4V2CcWMSrufy5LJE_Fv49kwCoFoPSTrBrrayzNxRqY/edit?usp=sharing) and [proposal](https://github.com/llm-d/llm-d/blob/main/docs/proposals/inference-resilience-operator.md)
+The llm-d Resiliency Operator (IRO) watches llm-d inference deployments and reacts when serving degrades, so a multi-node model server can get back to healthy without a human in the loop.
+
+This project is in early development under [llm-d-incubation](https://github.com/llm-d-incubation). See the [llm-d project](https://github.com/llm-d/llm-d) for how it fits into the wider stack, the [proposal](https://github.com/llm-d/llm-d/blob/main/docs/proposals/inference-resilience-operator.md) and the [WIP design doc](https://docs.google.com/document/d/1q4V2CcWMSrufy5LJE_Fv49kwCoFoPSTrBrrayzNxRqY/edit?usp=sharing).
 
 ## Prerequisites
 
-- Go 1.24+
+- Go 1.25+
 - Docker (for container builds)
 - [pre-commit](https://pre-commit.com/) (for local development)
 
@@ -64,14 +67,6 @@ make fmt            # Format Go and Python code
 make image-build    # Build multi-arch container image
 make pre-commit     # Run pre-commit hooks
 ```
-
-## Architecture
-
-Please refer to the [WIP design doc](https://docs.google.com/document/d/1q4V2CcWMSrufy5LJE_Fv49kwCoFoPSTrBrrayzNxRqY/edit?usp=sharing).
-
-## Configuration
-
-<!-- TODO: Document configuration options, environment variables, CLI flags -->
 
 ## Contributing
 
