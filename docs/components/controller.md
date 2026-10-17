@@ -332,6 +332,7 @@ when to stop, is the workload's restart policy. When the workload stops recreati
 | Flag | Default | Meaning |
 |---|---|---|
 | `--enable-engine-ft` | `false` | turn the controller on (needs `--leader-elect`) |
+| `--ft-dry-run` | `false` | log each Pod reset and reconfig instead of doing it. The record stays in memory, and after each skipped action the controller starts over from the live group. |
 | `--engine` | | engine implementation |
 | `--workload` | | workload implementation |
 | `--ft-diagnosis-timeout` | 75s | longest time in `recovering` with nothing sent |

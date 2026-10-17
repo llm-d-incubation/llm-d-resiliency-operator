@@ -31,6 +31,7 @@ type WorkloadFactory interface {
 
 type Options struct {
 	Enabled   bool
+	DryRun    bool
 	Engine    string
 	Workload  string
 	Config    Config
@@ -50,6 +51,7 @@ func (options *Options) BindFlags(flags *flag.FlagSet) {
 	options.Config = Defaults()
 	config := &options.Config
 	flags.BoolVar(&options.Enabled, "enable-engine-ft", false, "recover inference engine faults (needs --leader-elect)")
+	flags.BoolVar(&options.DryRun, "ft-dry-run", false, "log what recovery would do, but delete no Pod and change no engine")
 	flags.StringVar(&options.Engine, "engine", "", "inference engine implementation")
 	flags.StringVar(&options.Workload, "workload", "lws", "workload implementation")
 	flags.DurationVar(&config.DiagnosisTimeout, "ft-diagnosis-timeout", config.DiagnosisTimeout,
@@ -92,7 +94,9 @@ func (options *Options) Setup(mgr ctrl.Manager, recorder Recorder) error {
 	if err != nil {
 		return err
 	}
-	return mgr.Add(&Runner{Workload: wl, Engine: eng, Journal: store, Recorder: recorder, Config: options.Config})
+	return mgr.Add(&Runner{
+		Workload: wl, Engine: eng, Journal: store, Recorder: recorder, Config: options.Config, DryRun: options.DryRun,
+	})
 }
 
 func (config *Config) validate() error {

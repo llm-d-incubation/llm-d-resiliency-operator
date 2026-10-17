@@ -63,7 +63,11 @@ func main() {
 		klog.Fatalf("unable to start manager: %v", err)
 	}
 
-	recorder := telemetry.New(ctrl.Log.WithName("engine-fault"), 10*engineFT.Config.ApplyTimeout)
+	log := ctrl.Log.WithName("engine-fault")
+	if engineFT.DryRun {
+		log = log.WithValues("dryRun", true)
+	}
+	recorder := telemetry.New(log, 10*engineFT.Config.ApplyTimeout)
 	if err := engineFT.Setup(mgr, recorder); err != nil {
 		klog.Fatalf("unable to set up engine FT: %v", err)
 	}

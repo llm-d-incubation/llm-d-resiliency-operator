@@ -5,6 +5,7 @@ package enginefault
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -113,6 +114,9 @@ func (fsm *controller) apply(
 		return err
 	}
 	acceptances, err := fsm.eng.Apply(ctx, current.obs, *reconfig)
+	if errors.Is(err, errDryRun) {
+		return err
+	}
 	fsm.recorder.ReconfigStarted(reconfig, plan)
 	if ctx.Err() != nil {
 		return ctx.Err()

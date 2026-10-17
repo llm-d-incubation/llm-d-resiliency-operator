@@ -22,6 +22,8 @@ type Runner struct {
 	Journal  journal.Journal
 	Recorder Recorder
 	Config   Config
+	// DryRun reads and decides as usual but deletes no Pod, changes no engine and writes no journal.
+	DryRun bool
 }
 
 func (*Runner) NeedLeaderElection() bool { return true }
@@ -29,11 +31,15 @@ func (*Runner) NeedLeaderElection() bool { return true }
 func (runner *Runner) Start(ctx context.Context) error {
 	ticker := time.NewTicker(runner.Config.PollInterval)
 	defer ticker.Stop()
+	wl, eng, store := runner.Workload, runner.Engine, runner.Journal
+	if runner.DryRun {
+		wl, eng, store = dryWorkload{wl}, dryEngine{eng}, &memJournal{}
+	}
 	var current Controller
 	for {
 		// Returning an error would stop the manager and every controller in it.
 		if current == nil {
-			loaded, err := New(ctx, runner.Workload, runner.Engine, runner.Journal, runner.Recorder, runner.Config)
+			loaded, err := New(ctx, wl, eng, store, runner.Recorder, runner.Config)
 			if err != nil && ctx.Err() == nil {
 				ctrl.LoggerFrom(ctx).Error(err, "load engine fault journal")
 			}
@@ -41,7 +47,12 @@ func (runner *Runner) Start(ctx context.Context) error {
 		}
 		if current != nil {
 			stepCtx, cancel := context.WithTimeout(ctx, runner.Config.ApplyTimeout)
-			if err := current.Step(stepCtx); errors.Is(err, journal.ErrConflict) {
+			err := current.Step(stepCtx)
+			if errors.Is(err, errDryRun) {
+				// In dryrun we should throw the state away so the next poll will look at the real Pods again.
+				store = &memJournal{}
+			}
+			if errors.Is(err, journal.ErrConflict) || errors.Is(err, errDryRun) {
 				current = nil
 			}
 			cancel()
