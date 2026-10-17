@@ -13,7 +13,7 @@ export default function Home() {
     <Layout description="Recover LLM inference engines from hardware faults on Kubernetes.">
       <main className="container home">
         <h1>
-          Your GPUs and engines will fail. <span>Plan accordingly.</span>
+          Your GPUs will fail. <span>Plan accordingly.</span>
         </h1>
         <p>
           The llm-d Inference Resiliency Operator (IRO) provides automated failure detection and recovery for distributed
