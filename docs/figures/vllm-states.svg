@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="420" viewBox="0 0 1080 420" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+<rect width="100%" height="100%" rx="8" fill="#ffffff"/>
+<text x="32.0" y="42.0" font-size="20" fill="#202124" text-anchor="start" font-weight="700" xml:space="preserve">A vLLM rank&#x27;s fault-tolerance state</text>
+<text x="32.0" y="66.0" font-size="13" fill="#5f6368" text-anchor="start" xml:space="preserve">as reported by /v1/fault_tolerance/status</text>
+<rect x="60.0" y="120.0" width="220.0" height="56.0" rx="28" fill="#e6f4ea" stroke="#1e8e3e" stroke-width="2.5"/>
+<text x="170.0" y="154.0" font-size="17" fill="#1e8e3e" text-anchor="middle" font-weight="700" xml:space="preserve">healthy</text>
+<rect x="420.0" y="120.0" width="220.0" height="56.0" rx="28" fill="#fef7e0" stroke="#f29900" stroke-width="2.5"/>
+<text x="530.0" y="154.0" font-size="17" fill="#f29900" text-anchor="middle" font-weight="700" xml:space="preserve">diagnosing</text>
+<rect x="780.0" y="120.0" width="220.0" height="56.0" rx="28" fill="#fef7e0" stroke="#f29900" stroke-width="2.5"/>
+<text x="890.0" y="154.0" font-size="17" fill="#f29900" text-anchor="middle" font-weight="700" xml:space="preserve">unhealthy</text>
+<rect x="420.0" y="300.0" width="220.0" height="56.0" rx="28" fill="#fce8e6" stroke="#d93025" stroke-width="2.5"/>
+<text x="530.0" y="334.0" font-size="17" fill="#d93025" text-anchor="middle" font-weight="700" xml:space="preserve">dead</text>
+<path d="M 280.0 140.0 L 420.0 140.0" fill="none" stroke="#f29900" stroke-width="1.8"/>
+<polygon points="420.0,140.0 410.8,143.9 410.8,136.1" fill="#f29900"/>
+<text x="350.0" y="130.0" font-size="12" fill="#f29900" text-anchor="middle" xml:space="preserve">fault in the busy loop</text>
+<path d="M 640.0 140.0 L 780.0 140.0" fill="none" stroke="#f29900" stroke-width="1.8"/>
+<polygon points="780.0,140.0 770.8,143.9 770.8,136.1" fill="#f29900"/>
+<text x="710.0" y="130.0" font-size="12" fill="#f29900" text-anchor="middle" xml:space="preserve">peers&#x27; mask known</text>
+<path d="M 890.0 120.0 L 890.0 84.0 L 170.0 84.0 L 170.0 120.0" fill="none" stroke="#1e8e3e" stroke-width="1.8"/>
+<polygon points="170.0,120.0 166.1,110.8 173.9,110.8" fill="#1e8e3e"/>
+<text x="530.0" y="76.0" font-size="12" fill="#1e8e3e" text-anchor="middle" xml:space="preserve">retry or scale_down succeeded</text>
+<path d="M 170.0 176.0 L 170.0 328.0 L 420.0 328.0" fill="none" stroke="#d93025" stroke-width="1.8"/>
+<polygon points="420.0,328.0 410.8,331.9 410.8,324.1" fill="#d93025"/>
+<text x="180.0" y="318.0" font-size="12" fill="#d93025" text-anchor="start" xml:space="preserve">own worker died</text>
+<path d="M 530.0 176.0 L 530.0 300.0" fill="none" stroke="#d93025" stroke-width="1.8"/>
+<polygon points="530.0,300.0 526.1,290.8 533.9,290.8" fill="#d93025"/>
+<text x="540.0" y="248.0" font-size="12" fill="#d93025" text-anchor="start" xml:space="preserve">own worker died</text>
+<path d="M 890.0 176.0 L 890.0 328.0 L 640.0 328.0" fill="none" stroke="#d93025" stroke-width="1.8"/>
+<polygon points="640.0,328.0 649.2,324.1 649.2,331.9" fill="#d93025"/>
+<text x="880.0" y="222.0" font-size="12" fill="#d93025" text-anchor="end" xml:space="preserve">scale_down failed, or no instruction</text>
+<text x="880.0" y="238.0" font-size="12" fill="#d93025" text-anchor="end" xml:space="preserve">for engine_recovery_timeout_sec</text>
+</svg>
