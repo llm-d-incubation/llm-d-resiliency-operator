@@ -334,13 +334,13 @@ when to stop, is the workload's restart policy. When the workload stops recreati
 | `--enable-engine-ft` | `false` | turn the controller on (needs `--leader-elect`) |
 | `--engine` | | engine implementation |
 | `--workload` | | workload implementation |
+| `--ft-poll-interval` | 1s | how often the leader reads the group and acts |
 | `--ft-diagnosis-timeout` | 75s | longest time in `recovering` with nothing sent |
 | `--ft-apply-timeout` | 90s | longest time a reconfig may stay in flight |
 | `--ft-verify-timeout` | 2m | how long a failed check after a reconfig is retried. 0 resets on the first failure. |
 | `--ft-unseen-timeout` | 10m | how long no admitted member may be readable before the group is reset. 0 waits forever. |
 | `--ft-capacity-restore` (target) | `reset-pod` | see [getting back to full](#getting-back-to-full) |
 | no flag | 2m | `FlapWindow`, for C6 |
-| no flag | 1s | `PollInterval` |
 
 Each engine and workload implementation registers its own flags.
 

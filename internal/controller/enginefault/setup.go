@@ -52,6 +52,7 @@ func (options *Options) BindFlags(flags *flag.FlagSet) {
 	flags.BoolVar(&options.Enabled, "enable-engine-ft", false, "recover inference engine faults (needs --leader-elect)")
 	flags.StringVar(&options.Engine, "engine", "", "inference engine implementation")
 	flags.StringVar(&options.Workload, "workload", "lws", "workload implementation")
+	flags.DurationVar(&config.PollInterval, "ft-poll-interval", config.PollInterval, "how often the leader reads the group and acts")
 	flags.DurationVar(&config.DiagnosisTimeout, "ft-diagnosis-timeout", config.DiagnosisTimeout,
 		"longest time recovering without a reconfig")
 	flags.DurationVar(&config.ApplyTimeout, "ft-apply-timeout", config.ApplyTimeout, "longest time a reconfig may stay in flight")
