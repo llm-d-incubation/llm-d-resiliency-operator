@@ -1,0 +1,9 @@
+# Categories for the notes that GitHub generates for a release.
+changelog:
+  categories:
+    - title: ✨ Changes
+      labels: ["*"]
+      exclude:
+        authors: [dependabot, "dependabot[bot]"]
+    - title: 🔧 Dependencies
+      labels: ["*"]
