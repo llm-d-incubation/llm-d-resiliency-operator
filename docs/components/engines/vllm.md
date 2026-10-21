@@ -39,7 +39,7 @@ Rules that shape the driver:
 | `Apply` | `retry` when nothing is removed, else `scale_down` with `removed_dp_ranks`; `request_id` is the reconfig ID. Refused before anything is sent when a participant cannot be reached or a removed rank is not terminal in the observation. A lost rank needs no address: its number comes from its name. |
 | Store host | when the reconfig removes the lowest alive rank: `dp_master_ip` of the lowest participant and `--vllm-store-port` plus its rank, so a second move inside one Pod does not reuse the port the previous host still holds. Ports from `--vllm-store-port` up to it plus the group size must be free. |
 | `Verify` | an 8-token completion on each member; the error names every rank that failed |
-| `Grow` | no: the fault tolerance API cannot add ranks |
+| `Grow` | false: failed-slot admission and targeted replacement launch are unavailable |
 | Same reconfig sent twice | never: `Progress` never says `NotStarted`, so IRO never resends. A second send would not be ignored: a healthy rank records it as failed under the same `request_id`, and a rank that faulted again runs it again. |
 
 Probe and Verify use ordinary completion requests and count toward vLLM request and token metrics.
@@ -70,6 +70,39 @@ The plan stays `Wait` and the diagnosis deadline resets the group.
 | otherwise | `Running` |
 | `NotStarted` | never. The status drops `last_ft_request_id` at the next state report, so a reconfig never sent looks like one that finished before a new fault. A new leader that finds an unsent reconfig fails it, and the group is reset. |
 
+## Replacement admission
+
+The adapter keeps `Grow: false`, proposes no `Add`, and reports no prepared replacement candidates. Recovery
+uses the FT retry and scale-down API. It sends no external EEP requests or supervisor launch requests. Empty
+incarnations preserve the existing member IDs, and the journal gains no replacement attempts during these
+flows. Controller reloads retain this behavior. A pure
+`Add` passed directly to `Apply` fails before any HTTP request with joiner-scoped `ApplyError`. An unsupported
+join found in a journal has an unknown outcome and fails with group scope. This prevents healthy participant
+status from being mistaken for successful replacement admission.
+
+Native interfaces constrain rejoin:
+
+| Interface | Available behavior | Missing for replacement |
+|---|---|---|
+| [FT scale-down](https://github.com/vllm-project/vllm/pull/46370) at `fcfbd373` | excludes original DP IDs, keeps configured DP/EP size and masks inactive slots | reactivation of an excluded slot and admission of a new process incarnation |
+| [External EEP](https://github.com/vllm-project/vllm/blob/dd9e07a25febb05f1a44f2ef9e6c56803ee1a9b6/vllm/distributed/elastic_ep/external_elastic_ep.py#L454) | launches joiners in `[current_size, target_size)`; preparation and commit wait for contiguous rank sets | composing expansion with FT's inactive slots, including an absent original rank 0 |
+| [Multi-port supervisor fix](https://github.com/vllm-project/vllm/pull/54963) at `b6ac74da` | preserves local survivors and removes exited ports from monitoring | an idempotent targeted-launch API and a durable process incarnation |
+
+For original ranks `{0,1,2,3}`, FT removal of rank 1 leaves `{0,2,3}` in a four-slot topology. Requesting EEP
+size 4 does not add a slot; requesting size 5 expects a new rank 4 and still includes the absent original rank
+in readiness and commit barriers. The adapter sends neither request as a repair attempt.
+
+Enabling replacement requires a native join operation that names the active participants and replacement
+slots, can establish its result after an IRO leader change, and can prove survivor safety after failure. A
+launcher must reserve an incarnation during observation, fence cleanup to the old process tree and Pod UID,
+and launch the replacement only at the native protocol's admission stage. `Apply(Add)` owns this sequence;
+`Observe` and `Progress` follow its durable operation state.
+
+Validation must cover removal and rejoin of an interior rank in a shared Pod, original rank 0 loss, a second
+failure after rejoin, an interrupted launch, an interrupted commit, and a refused join that leaves survivors
+serving. Successful membership commitment is followed by IRO inference verification. The supervisor's status
+probe must use `/v1/fault_tolerance/status` to match the FT API.
+
 ## Flags
 
 | Flag | Default |
@@ -89,8 +122,9 @@ For vLLM with `--api-key`, mount the key as a Secret file and pass its path with
 For TLS, set `--vllm-https` and optionally `--vllm-ca-file` for a private CA.
 The server certificate must cover the Pod IP used by IRO.
 
-- After `scale_down`, a removed rank stays dead. Its Pod remains while it hosts surviving ranks;
-  the removed rank cannot rejoin and keeps its GPU until the group is recreated.
+- After `scale_down`, a removed rank stays dead. Its Pod remains while it hosts surviving ranks.
+  Exiting worker processes release their CUDA allocations; the Pod retains its requested GPU resources.
+  Replacement requires the [native admission and launcher contracts](#replacement-admission).
 - Set `VLLM_KEEP_ALIVE_ON_ENGINE_DEATH=1`. Otherwise the API server exits with its engine and its container
   restarts: under `RecreateGroupOnPodRestart` the workload recreates the whole group and IRO never gets to
   shrink it; under `None` IRO removes the rank only once the restart changes its Pod's identity, and the

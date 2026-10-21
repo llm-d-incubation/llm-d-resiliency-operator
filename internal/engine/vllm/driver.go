@@ -121,7 +121,12 @@ func (eng *Engine) Apply(
 	ctx context.Context, observation engine.Observation, reconfig engine.Reconfig,
 ) ([]engine.Acceptance, error) {
 	if len(reconfig.Add) > 0 {
-		return nil, errors.New("vLLM cannot admit members")
+		err := errors.New("vLLM member admission is unsupported: FT leaves inactive slots; " +
+			"replacement launch and slot rejoin are unavailable")
+		if len(reconfig.Remove) == 0 {
+			return nil, &engine.ApplyError{Scope: engine.Joiners, Err: err}
+		}
+		return nil, err
 	}
 	found := ranksOf(observation)
 	for _, id := range reconfig.Participants {

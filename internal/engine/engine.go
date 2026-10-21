@@ -39,6 +39,8 @@ type Member struct {
 	Pod         workload.PodRef
 	PodIdentity string
 	Name        string
+	Incarnation string
+	Replaces    MemberID
 	Serving     bool
 	Terminal    bool
 	Unknown     bool
@@ -46,7 +48,13 @@ type Member struct {
 	Detail      string
 }
 
-func (member *Member) ID() MemberID { return MemberID(member.Name + "@" + member.PodIdentity) }
+func (member *Member) ID() MemberID {
+	name := member.Name
+	if member.Incarnation != "" {
+		name += "@" + member.Incarnation
+	}
+	return MemberID(name + "@" + member.PodIdentity)
+}
 
 type Observation struct {
 	Members []Member
@@ -104,3 +112,12 @@ const (
 	Joiners FailureScope = "Joiners"
 	Group   FailureScope = "Group"
 )
+
+// ApplyError scopes an apply failure after the driver has established its effects.
+type ApplyError struct {
+	Scope FailureScope
+	Err   error
+}
+
+func (err *ApplyError) Error() string { return err.Err.Error() }
+func (err *ApplyError) Unwrap() error { return err.Err }

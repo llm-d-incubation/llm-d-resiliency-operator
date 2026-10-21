@@ -5,6 +5,7 @@ package enginefault
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -33,12 +34,10 @@ func (fsm *controller) watch(ctx context.Context, next *Record, current *view, n
 		return fsm.verify(ctx, next, current, now)
 	case engine.Failed:
 		fsm.finishReconfig(next, &progress, now)
-		if progress.Scope != engine.Joiners {
+		if progress.Scope != engine.Joiners || len(reconfig.Add) == 0 || len(reconfig.Remove) != 0 {
 			return fsm.resetAll(ctx, next, ResetReconfigFailed, progress.Reason, now)
 		}
-		for _, id := range reconfig.Add {
-			next.Members[id] = Rejected
-		}
+		rejectJoiners(next, &reconfig)
 		if next.Phase == Recovering {
 			next.Since = now
 		}
@@ -73,6 +72,14 @@ func (fsm *controller) send(ctx context.Context, next *Record, current *view, pl
 		ID: newID("iro-ft-", 16), Participants: slices.Clone(plan.Participants),
 		Remove: slices.Clone(plan.Remove), Add: slices.Clone(plan.Add),
 	}
+	for _, id := range reconfig.Add {
+		if previous := current.members[id].Replaces; previous != "" {
+			if next.Replacements == nil {
+				next.Replacements = map[engine.MemberID]engine.MemberID{}
+			}
+			next.Replacements[previous] = id
+		}
+	}
 	next.Reconfig, next.ReconfigSince, next.Acceptances, next.Reason = &reconfig, now, nil, plan.Reason
 	if noChange {
 		next.LastNoChangeReconfig = now
@@ -93,6 +100,9 @@ func (fsm *controller) resend(ctx context.Context, next *Record, current *view, 
 		Reason: "resent: no member got it",
 	}
 	if reason := checkPlan(next, current, &plan); reason != "" {
+		if len(reconfig.Add) > 0 && len(reconfig.Remove) == 0 {
+			rejectJoiners(next, &reconfig)
+		}
 		fsm.finishReconfig(next, &engine.Progress{State: engine.NotStarted, Reason: reason}, now)
 		next.Reason = "dropped " + reconfig.ID + ", no member got it: " + reason
 		if next.Phase == Recovering {
@@ -119,10 +129,22 @@ func (fsm *controller) apply(
 	}
 	next.Acceptances = acceptances
 	if err != nil {
+		var applyErr *engine.ApplyError
+		if errors.As(err, &applyErr) && applyErr.Scope == engine.Joiners && len(reconfig.Add) > 0 && len(reconfig.Remove) == 0 {
+			fsm.finishReconfig(next, &engine.Progress{State: engine.Failed, Scope: engine.Joiners, Reason: err.Error()}, now)
+			rejectJoiners(next, reconfig)
+			return nil
+		}
 		fsm.finishReconfig(next, &engine.Progress{State: engine.Failed, Scope: engine.Group, Reason: err.Error()}, now)
 		return fsm.resetAll(ctx, next, ResetReconfigFailed, err.Error(), now)
 	}
 	return nil
+}
+
+func rejectJoiners(next *Record, reconfig *engine.Reconfig) {
+	for _, id := range reconfig.Add {
+		next.Members[id] = Rejected
+	}
 }
 
 func checkPlan(next *Record, current *view, plan *engine.Plan) string {
@@ -148,10 +170,27 @@ func checkPlan(next *Record, current *view, plan *engine.Plan) string {
 			return fmt.Sprintf("C1: member %s is not terminal", id)
 		}
 	}
+	replacements := map[engine.MemberID]bool{}
 	for _, id := range plan.Add {
 		member := current.members[id]
-		if next.Members[id] != Candidate || member == nil || !member.Joinable || !joinable(next, current.group, member) {
+		if next.Members[id] != Candidate || member == nil || !member.Joinable ||
+			!joinable(next, current.group, member) || !replacementAllowed(next, member) {
 			return fmt.Sprintf("C2: member %s cannot join", id)
+		}
+		if member.Replaces != "" {
+			if replacements[member.Replaces] {
+				return "C2: a member has more than one replacement"
+			}
+			replacements[member.Replaces] = true
+			if len(plan.Remove) > 0 || len(next.Verifying) > 0 {
+				return "C2: replacement must follow verified recovery"
+			}
+			for _, admitted := range current.admitted {
+				survivor := current.members[admitted]
+				if survivor == nil || !survivor.Serving || !slices.Contains(plan.Participants, admitted) {
+					return "C2: replacement needs every survivor serving and participating"
+				}
+			}
 		}
 	}
 	return ""
