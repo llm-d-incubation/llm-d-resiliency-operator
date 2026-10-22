@@ -4,7 +4,6 @@
 package enginefault
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -118,21 +117,19 @@ func (fsm *controller) save(ctx context.Context, next *Record) error {
 	if err != nil {
 		return err
 	}
-	if !bytes.Equal(data, fsm.saved) {
-		version, err := fsm.store.Save(ctx, data, fsm.version)
-		if err != nil {
-			fsm.pending = nil
-			fsm.recorder.SaveFailed(err)
-			return fmt.Errorf("save journal: %w", err)
-		}
-		previous := fsm.record()
-		fsm.saved, fsm.version = data, version
-		if previous.Phase != next.Phase {
-			fsm.recorder.PhaseChanged(previous.Phase, next.Phase, next.Reason)
-		}
-		if previous.WouldDo != next.WouldDo {
-			fsm.recorder.WouldDo(previous.WouldDo, next.WouldDo, next.Reason)
-		}
+	version, err := fsm.store.Save(ctx, data, fsm.version)
+	if err != nil {
+		fsm.pending = nil
+		fsm.recorder.SaveFailed(err)
+		return fmt.Errorf("save journal: %w", err)
+	}
+	previous := fsm.record()
+	fsm.saved, fsm.version = data, version
+	if previous.Phase != next.Phase {
+		fsm.recorder.PhaseChanged(previous.Phase, next.Phase, next.Reason)
+	}
+	if previous.WouldDo != next.WouldDo {
+		fsm.recorder.WouldDo(previous.WouldDo, next.WouldDo, next.Reason)
 	}
 	for _, emit := range fsm.pending {
 		emit()

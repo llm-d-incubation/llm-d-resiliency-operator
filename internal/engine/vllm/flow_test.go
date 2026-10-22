@@ -7,6 +7,7 @@ package vllm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -245,6 +246,39 @@ func TestFlowDeadRankIsRemoved(t *testing.T) {
 	}
 	if payload := run.fleet.ranks[0].applied[0]; params(t, payload)["dp_master_ip"] != nil {
 		t.Fatalf("store moved without reason: %v", payload)
+	}
+}
+
+func TestFlowJournalLostWhileServing(t *testing.T) {
+	t.Parallel()
+	run := newFlow(t)
+	if err := run.fsm.Step(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	pods := slices.Clone(run.wl.pods)
+	run.store.mu.Lock()
+	run.store.data, run.store.version = nil, 0
+	run.store.mu.Unlock()
+	if err := run.fsm.Step(t.Context()); !errors.Is(err, journal.ErrConflict) {
+		t.Fatalf("deleted journal: got %v, want conflict", err)
+	}
+	config := enginefault.Defaults()
+	fsm, err := enginefault.New(t.Context(), run.wl, run.fleet.eng, run.store,
+		telemetry.New(logr.Discard(), time.Minute), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run.fsm = fsm
+	record := run.until("journal recreated with four admitted ranks", func(record enginefault.Record) bool {
+		return served(&record) && len(record.Members) == len(four)
+	})
+	for _, state := range record.Members {
+		if state != enginefault.Admitted {
+			t.Fatalf("members %v", record.Members)
+		}
+	}
+	if run.wl.resetAll != 0 || len(run.sim.applies) != 0 || !slices.Equal(run.wl.pods, pods) {
+		t.Fatalf("group resets %d, applies %v, pods %v", run.wl.resetAll, run.sim.applies, run.wl.pods)
 	}
 }
 
