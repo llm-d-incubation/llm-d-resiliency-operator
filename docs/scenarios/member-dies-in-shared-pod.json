@@ -1,0 +1,251 @@
+{
+  "title": "A member rejoins through a resumable action",
+  "page": "failures/member-dies-in-shared-pod",
+  "pods": [
+    {
+      "name": "pod-0",
+      "uid": "a1",
+      "members": {
+        "m0": "serving",
+        "m1": "serving",
+        "m2": "serving",
+        "m3": "serving"
+      }
+    }
+  ],
+  "steps": [
+    {
+      "title": "One member dies",
+      "phase": "recovering",
+      "calls": [
+        {
+          "to": "driver",
+          "call": "Observe",
+          "out": "m1@idA Terminal; container and other processes survive"
+        }
+      ],
+      "pods": {
+        "pod-0": {
+          "m1": "dead"
+        }
+      }
+    },
+    {
+      "title": "Policy chooses removal",
+      "phase": "recovering",
+      "calls": [
+        {
+          "to": "policy",
+          "call": "Decide(input)",
+          "out": "Change: Remove m1@idA; policy State: stage=remove"
+        },
+        {
+          "to": "journal",
+          "call": "Save",
+          "out": "operation remove-1; budget Actions=1; policy checkpoint"
+        },
+        {
+          "to": "journal",
+          "call": "Save",
+          "out": "remove-1 Attempted=true before driver call"
+        },
+        {
+          "to": "driver",
+          "call": "Apply(remove-1, Attempted=false)",
+          "out": "Running; removal submitted"
+        }
+      ]
+    },
+    {
+      "title": "Removal completes and survivors are verified",
+      "phase": "recovering",
+      "calls": [
+        {
+          "to": "driver",
+          "call": "Apply(remove-1, Attempted=true)",
+          "out": "Succeeded; removal committed"
+        },
+        {
+          "to": "journal",
+          "call": "Save",
+          "out": "m1 excluded; result remove-1 Succeeded"
+        },
+        {
+          "to": "policy",
+          "call": "Decide(input)",
+          "out": "Verify: m0, m2, m3"
+        },
+        {
+          "to": "journal",
+          "call": "Save",
+          "out": "verify-1 and attempted marker"
+        },
+        {
+          "to": "driver",
+          "call": "Apply(verify-1)",
+          "out": "Succeeded; survivors generated tokens"
+        },
+        {
+          "to": "journal",
+          "call": "Save",
+          "out": "result verify-1 Succeeded"
+        }
+      ],
+      "pods": {
+        "pod-0": {
+          "m1": "excluded"
+        }
+      }
+    },
+    {
+      "title": "Observe a reserved replacement",
+      "phase": "serving",
+      "calls": [
+        {
+          "to": "driver",
+          "call": "Observe",
+          "out": "m1-process2@idA Joinable; Replaces m1@idA"
+        }
+      ],
+      "pods": {
+        "pod-0": {
+          "m1-new": "starting"
+        }
+      }
+    },
+    {
+      "title": "Policy chooses admission; driver prepares survivors",
+      "phase": "serving",
+      "calls": [
+        {
+          "to": "policy",
+          "call": "Decide(input)",
+          "out": "Change: Add m1-process2@idA; policy State: attempt=1"
+        },
+        {
+          "to": "journal",
+          "call": "Save",
+          "out": "add-1 and policy checkpoint; budget Actions=2; Attempted=true"
+        },
+        {
+          "to": "driver",
+          "call": "Apply(add-1, Attempted=false)",
+          "out": "Running; Checkpoint: stage=preparing"
+        },
+        {
+          "to": "journal",
+          "call": "Save",
+          "out": "add-1 execution checkpoint"
+        }
+      ],
+      "pods": {
+        "pod-0": {
+          "m1-new": "joining"
+        }
+      },
+      "note": "One immutable admission action can span many calls. Decide is not called while add-1 is pending."
+    },
+    {
+      "title": "Driver advances the same admission action",
+      "phase": "serving",
+      "calls": [
+        {
+          "to": "driver",
+          "call": "Observe",
+          "out": "survivors prepared for add-1"
+        },
+        {
+          "to": "driver",
+          "call": "Apply(add-1, Attempted=true)",
+          "out": "Running; reserved process launched; Checkpoint: stage=launched"
+        },
+        {
+          "to": "journal",
+          "call": "Save",
+          "out": "add-1 Checkpoint=launched; budget still Actions=2"
+        }
+      ],
+      "note": "The driver controls native cleanup and launch. It fences effects by operation and process identity."
+    },
+    {
+      "title": "A new leader resumes add-1",
+      "phase": "serving",
+      "calls": [
+        {
+          "to": "journal",
+          "call": "Load",
+          "out": "add-1, Attempted=true, execution checkpoint, policy state, Actions=2"
+        },
+        {
+          "to": "driver",
+          "call": "Observe",
+          "out": "replacement already launched under add-1"
+        },
+        {
+          "to": "driver",
+          "call": "Apply(add-1, Attempted=true)",
+          "out": "Running; continue membership commit"
+        }
+      ],
+      "note": "If the launch checkpoint was lost, remote readback or runtime deduplication must still prevent a duplicate launch."
+    },
+    {
+      "title": "Admission completes",
+      "phase": "serving",
+      "calls": [
+        {
+          "to": "driver",
+          "call": "Apply(add-1)",
+          "out": "Succeeded; reserved replacement observed and membership committed"
+        },
+        {
+          "to": "journal",
+          "call": "Save",
+          "out": "replacement admitted; result add-1 Succeeded"
+        },
+        {
+          "to": "policy",
+          "call": "Decide(input)",
+          "out": "Verify: expanded membership"
+        },
+        {
+          "to": "journal",
+          "call": "Save",
+          "out": "verify-2 and attempted marker"
+        },
+        {
+          "to": "driver",
+          "call": "Apply(verify-2)",
+          "out": "Succeeded"
+        },
+        {
+          "to": "journal",
+          "call": "Save",
+          "out": "result verify-2 Succeeded"
+        }
+      ],
+      "pods": {
+        "pod-0": {
+          "m1-new": "serving"
+        }
+      }
+    },
+    {
+      "title": "Policy confirms serving",
+      "phase": "serving",
+      "calls": [
+        {
+          "to": "policy",
+          "call": "Decide(input)",
+          "out": "Healthy"
+        },
+        {
+          "to": "journal",
+          "call": "Save",
+          "out": "start stable-health interval; keep recovery Actions=2"
+        }
+      ],
+      "note": "The controller clears its recovery budget only after sustained confirmed health. A brief Healthy report preserves the count."
+    }
+  ]
+}

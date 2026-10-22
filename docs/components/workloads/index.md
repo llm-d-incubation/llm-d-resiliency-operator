@@ -25,7 +25,7 @@ its containers run one: no ranks, ports or processes. Each workload type brings 
 | Workload → Kubernetes | its own Kubernetes objects | inside the calls above | |
 
 It never talks to the engine. How often a group may be recreated, and when to stop, is the workload's own
-restart policy: IRO has no reset budget of its own.
+restart policy. The engine policy chooses when to request a group reset.
 
 ## Pods
 
@@ -58,8 +58,9 @@ the leader is deleted. Otherwise the controller may plan a reconfig for a group 
 
 ## Every poll
 
-The controller calls `Discover` every poll. It calls `Reset`, `ResetAll` or `Release` only when it decided Pods
-must go, saves that first, and repeats the call every poll until `Discover` shows the result.
+The controller calls `Discover` every poll. It calls `Reset`, `ResetAll` or `Release` only when the engine policy
+selected the corresponding action, saves that first, and repeats the call every poll until `Discover` shows
+the result.
 
 [example workload-calls]: ../../scenarios/workload-calls.json
 
@@ -110,7 +111,7 @@ Reset(ctx, []PodRef{{"pod-2", "c1"}, {"pod-3", "d1"}})
 |---|---|
 | Touch only the Pods named, by UID | a late call can never hit a new Pod |
 | Never recreate the rest of the group; return `ErrUnsupported` instead | the healthy members keep serving |
-| `ErrUnsupported` changes nothing, for the whole list | the controller then asks for each Pod alone, and keeps the ones the workload cannot replace |
+| `ErrUnsupported` changes nothing, for the whole list | the failed result lets policy choose smaller targets or another action |
 
 Some workloads cannot replace their leader without recreating the group, so they return `ErrUnsupported` for
 any list that names it. `Reset` never names every Pod of the group: the controller names only Pods whose

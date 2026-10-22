@@ -34,13 +34,13 @@ Rules that shape the driver:
 | `Observe` | status and `/health` of every rank of every Pod that has an IP and is not terminating |
 | `Serving` | status `healthy` and `/health` 200 |
 | `Terminal` | status `dead`, or `/health` 503 |
-| `Unknown` | the API does not answer, or answers for another rank. If IRO can read no admitted rank, it waits with its deadlines paused and resets the group after `--ft-unseen-timeout`; if it can read some, the unknown ranks are a fault. |
-| `Probe` | one short completion to each serving rank, so idle peers run a step and notice a dead rank |
-| `Apply` | `retry` when nothing is removed, else `scale_down` with `removed_dp_ranks`; `request_id` is the reconfig ID. Refused before anything is sent when a participant cannot be reached or a removed rank is not terminal in the observation. A lost rank needs no address: its number comes from its name. |
+| `Unknown` | the API does not answer, or answers for another rank. If IRO can read no admitted rank, it waits until `ObservationTimedOut` is set, then the policy requests `RecreateGroup`; if it can read some, the unknown ranks are a fault. |
+| `Apply` for `Probe` | one short completion to each serving rank, so idle peers run a step and notice a dead rank |
+| `Apply` for `Change` | `retry` when nothing is removed, else `scale_down` with `removed_dp_ranks`; `request_id` is the reconfig ID. Refused before anything is sent when a participant cannot be reached or a removed rank is not terminal in the observation. A lost rank needs no address: its number comes from its name. |
 | Store host | when the reconfig removes the lowest alive rank: `dp_master_ip` of the lowest participant and `--vllm-store-port` plus its rank, so a second move inside one Pod does not reuse the port the previous host still holds. Ports from `--vllm-store-port` up to it plus the group size must be free. |
-| `Verify` | an 8-token completion on each member; the error names every rank that failed |
+| `Apply` for `Verify` | an 8-token completion on each member; the error names every rank that failed |
 | `Grow` | no: the fault tolerance API cannot add ranks |
-| Same reconfig sent twice | never: `Progress` never says `NotStarted`, so IRO never resends. A second send would not be ignored: a healthy rank records it as failed under the same `request_id`, and a rank that faulted again runs it again. |
+| Same reconfig sent twice | `Apply` sends only on its first authorized attempt. Resumed calls inspect status. The API does not safely deduplicate a second send after a completed request or later fault. |
 
 Probe and Verify use ordinary completion requests and count toward vLLM request and token metrics.
 The API provides no option to exclude them; dashboards and traffic accounting must allow for this traffic.
@@ -48,27 +48,43 @@ Verify sets `ignore_eos` and requires 8 completion tokens, including tokens hidd
 
 ## Policy
 
-| Admitted ranks | Plan |
+The vLLM policy stores its recovery checkpoint in the controller journal. It chooses the next action from
+that checkpoint, the latest observation and the last completed operation.
+
+| Observation or result | Action |
 |---|---|
-| all serving | `Healthy` |
-| none left alive | `Unrecoverable` |
-| one unknown, `diagnosing`, or running an instruction | `Wait` |
+| initial ranks all serving | `Verify`, then `Healthy` after success |
+| a new fault | `Probe` once, recording the fault start in policy state |
+| none left alive | `RecreateGroup` |
+| one unknown, `diagnosing`, or running an instruction | `Wait` until the diagnosis interval expires, then `RecreateGroup` |
 | some faulted, some still `healthy` | `Wait`: vLLM rejects instructions until every survivor reports `unhealthy` |
 | some terminal, every survivor `unhealthy` | `Change`: remove the terminal ranks |
-| none terminal, all `unhealthy` | `Change`: retry |
+| none terminal, all `unhealthy` | `Change`: retry, unless a previous retry falls within `FlapWindow` |
+| reconfig succeeded | `Verify` its participants |
+| verification failed | retry `Verify` within `VerifyTimeout`, measured from the first failure; otherwise `RecreateGroup` |
+| group-scoped failure or unsafe outcome | `RecreateGroup` |
+| ranks serving and required verification passed | `Healthy`, or a configured capacity action |
 
-A rank that stays `healthy` while its peers fault (stuck in a collective) never accepts an instruction.
-The plan stays `Wait` and the diagnosis deadline resets the group.
+The checkpoint preserves consumed result IDs, fault and verification start times, and the most recent
+membership-preserving retry. A repeated observation or leader change does not restart those limits.
 
-| During a reconfig | Progress |
+vLLM cannot admit replacement ranks. Its policy requests `ReplaceMembers` for excluded or rejected members
+after verification, and records that request in its checkpoint. The controller maps it using capacity
+configuration: `reset-pod` keeps reduced capacity, `release` releases eligible Pods, and `reset-all` recreates
+the group. A shared Pod containing admitted ranks is never eligible for individual release.
+
+A rank that stays `healthy` while its peers fault never accepts an instruction. The policy waits for diagnosis
+and chooses `RecreateGroup` when its saved diagnosis interval expires.
+
+| During a reconfig | `Apply` report |
 |---|---|
 | a participant is terminal | `Failed`, scope `Group` |
 | `ft_state` is `failed` for this reconfig | `Failed`, scope `Group` |
-| a participant runs another `request_id` | `Failed`, scope `Group` |
-| a participant is `unhealthy` with no `request_id`: it finished the reconfig and faulted after it, or never got it | `Failed`, scope `Group` |
-| every participant serving | `Succeeded` |
+| a participant runs another `request_id` | `Running`; the saved operation outcome remains unknown |
+| a participant is `unhealthy` with no `request_id`: it finished the reconfig and faulted after it, or never got it | `Running`; no blind resubmission |
+| every participant serving, with no conflicting request ID or recovery in progress | `Succeeded` |
 | otherwise | `Running` |
-| `NotStarted` | never. The status drops `last_ft_request_id` at the next state report, so a reconfig never sent looks like one that finished before a new fault. A new leader that finds an unsent reconfig fails it, and the group is reset. |
+| resumed call with an ambiguous request outcome | `Running`; preserve the operation. The status drops `last_ft_request_id` at the next state report, so an unsent request can resemble one that finished before another fault. The driver does not resend without proof. |
 
 ## Flags
 
@@ -122,7 +138,7 @@ NIXL 1.3.2 and 1.5.0).
 
 | Issue | What IRO does |
 |---|---|
-| With NIXL before 1.4, removing the highest rank succeeds, then the next step fails `x.size(1) == active_rank_bound * num_max_dispatch_tokens_per_rank` in `nixl_ep`. NIXL 1.5.0, which vLLM pins, removes it in place. For NIXL 1.3, `Etelis/vllm` branch `ft-nixl-ep-highest-rank` trims the expert output to the dispatched slots. | `Progress` fails the reconfig on the new fault and the group is reset |
-| A Pod that disappears (not just its processes) can wedge the survivors: their next step fails on a Gloo connection reset, but the `nixl_ep` fault of the step in flight is never raised, so the EngineCore never learns of it and blocks on the shared-memory broadcast with status `healthy`. Seen in 1 of 2 Pod deletions at `384ba19`, none of 11 at `fcfbd37`. | the plan waits; the diagnosis deadline resets the group |
+| With NIXL before 1.4, removing the highest rank succeeds, then the next step fails `x.size(1) == active_rank_bound * num_max_dispatch_tokens_per_rank` in `nixl_ep`. NIXL 1.5.0, which vLLM pins, removes it in place. For NIXL 1.3, `Etelis/vllm` branch `ft-nixl-ep-highest-rank` trims the expert output to the dispatched slots. | `Apply` reports the established reconfig failure on the new fault and the group is reset |
+| A Pod that disappears (not just its processes) can wedge the survivors: their next step fails on a Gloo connection reset, but the `nixl_ep` fault of the step in flight is never raised, so the EngineCore never learns of it and blocks on the shared-memory broadcast with status `healthy`. Seen in 1 of 2 Pod deletions at `384ba19`, none of 11 at `fcfbd37`. | the policy waits; the diagnosis deadline resets the group |
 | The DP coordinator (rank 0) dying goes unnoticed under load; the first request after an idle period faults the group | the probe wakes the idle rank, then a retry; a second one within `FlapWindow` resets the group |
 | NIXL 1.4 and later fail across Pods on nodes without GPU-initiated RDMA: `invalid memh` on unusable devices, then `lane not found` | none: the group does not start |

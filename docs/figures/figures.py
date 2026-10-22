@@ -220,13 +220,13 @@ def architecture():
     s = Svg(1200, 820, "IRO at a glance", "one manager per engine group · the controller only talks to its plugins")
     s.rect(30, 92, 790, 620, C["blue"], "#fbfcff", r=10)
     s.text(48, 118, "IRO manager  (leader-elected)", 14, color=C["blue"], bold=True)
-    s.box(60, 330, 210, 100, "Controller", ["one step per poll", "phases, deadlines, checks"], tone="blue")
+    s.box(60, 330, 210, 100, "Controller", ["one step per poll", "saves, executes, checks"], tone="blue")
     s.box(540, 140, 260, 66, "Journal", ["versioned record, Load / Save"], tone="grey")
     s.box(540, 260, 260, 78, "Workload", ["one group of Pods", "Pod identity, Reset, Release"], tone="grey")
     s.rect(540, 380, 260, 170, C["green"], C["green_bg"])
     s.text(554, 404, "Engine", 14, bold=True)
     s.text(554, 424, "one plugin per inference engine", 12.5, color=C["muted"])
-    s.box(554, 442, 112, 90, "Policy", ["pure: plans,", "no I/O"], tone="green", fill="#ffffff")
+    s.box(554, 442, 112, 90, "Policy", ["pure: decides", "no I/O"], tone="green", fill="#ffffff")
     s.box(676, 442, 112, 90, "Driver", ["reads, applies", "over HTTP"], tone="green", fill="#ffffff")
     s.box(540, 620, 260, 60, "Telemetry", ["metrics, Events, logs"], tone="grey")
     s.arrow([(165, 330), (165, 173), (540, 173)], C["blue"], "Load, Save", (350, 165))
@@ -240,7 +240,7 @@ def architecture():
     s.arrow(
         [(270, 400), (470, 400), (470, 465), (540, 465)],
         C["blue"],
-        ["Observe, Probe, Apply,", "Verify · Plan, Progress"],
+        ["Observe, Apply", "Decide"],
         (284, 422),
         anchor="start",
     )
@@ -289,30 +289,31 @@ def step():
             (
                 "2  decide",
                 [
-                    ("msg", "c", "p", "Plan(observation, admitted, candidates)", False),
-                    ("msg", "p", "c", "Healthy · Wait · Change · Unrecoverable", True),
+                    ("msg", "c", "p", "Decide(input)", False),
+                    ("msg", "p", "c", "next action + policy checkpoint", True),
                     (
                         "note",
                         "c",
                         "w",
-                        ["a reconfig in flight asks Progress(observation, reconfig)", "instead of Plan"],
+                        ["a pending operation resumes through Apply", "with the same action, ID and checkpoint"],
                         "amber",
                     ),
                 ],
             ),
             (
-                "3  act, only for a Change that passes the checks",
+                "3  save and execute the selected action; Change shown here",
                 [
-                    ("msg", "c", "j", "Save(reconfig)", False),
-                    ("msg", "c", "d", "Apply(observation, reconfig)", False),
-                    ("msg", "d", "c", "acceptances", True),
-                    ("msg", "c", "j", "Save(acceptances)", False),
+                    ("msg", "c", "j", "Save(operation, policy checkpoint)", False),
+                    ("msg", "c", "d", "Apply(observation, operation)", False),
+                    ("msg", "d", "c", "status and execution checkpoint", True),
+                    ("msg", "c", "j", "Save(report checkpoint)", False),
                 ],
             ),
             (
-                "4  restore capacity, only when serving below full",
+                "4  finish the operation before the next policy decision",
                 [
-                    ("msg", "c", "w", "Reset(Pods), ResetAll or Release", False),
+                    ("msg", "c", "j", "Save(result)", False),
+                    ("note", "c", "p", ["Decide uses the saved result to choose the next action"], "amber"),
                 ],
             ),
         ],
@@ -342,18 +343,22 @@ def recovery_sequence():
                 [
                     ("msg", "c", "d", "Observe(pods)", False),
                     ("msg", "d", "c", "m3 terminal, m0–m2 paused", True),
-                    ("msg", "c", "p", "Plan(...)", False),
+                    ("msg", "c", "p", "Decide(...)", False),
                     ("msg", "p", "c", "Change: remove m3", True),
                     ("msg", "c", "d", "Apply(remove m3)", False),
-                    ("msg", "c", "p", "Progress(...)", False),
-                    ("msg", "p", "c", "Succeeded", True),
-                    ("msg", "c", "d", "Verify(m0, m1, m2)", False),
+                    ("msg", "c", "d", "Apply(same operation)", False),
+                    ("msg", "d", "c", "Succeeded", True),
+                    ("msg", "c", "p", "Decide(..., last result)", False),
+                    ("msg", "p", "c", "Verify: m0, m1, m2", True),
+                    ("msg", "c", "d", "Apply(Verify: m0, m1, m2)", False),
                     ("note", "c", "d", ["serving with 3 members; pod-3 holds only an excluded member"], "amber"),
                 ],
             ),
             (
                 "t3  reset the failed Pod  ·  serving",
                 [
+                    ("msg", "c", "p", "Decide(..., verification succeeded)", False),
+                    ("msg", "p", "c", "ReplaceMembers: m3", True),
                     ("msg", "c", "w", "Reset(pod-3, UID d1)", False),
                     ("msg", "w", "c", "pod-3 back with UID d2, then Ready", True, "grey"),
                 ],
@@ -363,10 +368,14 @@ def recovery_sequence():
                 [
                     ("msg", "c", "d", "Observe(pods)", False),
                     ("msg", "d", "c", "m3 on pod-3 (d2) joinable", True),
-                    ("msg", "c", "p", "Plan(...)", False),
+                    ("msg", "c", "p", "Decide(...)", False),
                     ("msg", "p", "c", "Change: add m3", True),
                     ("msg", "c", "d", "Apply(add m3)", False),
-                    ("msg", "c", "d", "Verify(m0 … m3)", False),
+                    ("msg", "c", "d", "Apply(same operation)", False),
+                    ("msg", "d", "c", "Succeeded", True),
+                    ("msg", "c", "p", "Decide(..., last result)", False),
+                    ("msg", "p", "c", "Verify: m0 through m3", True),
+                    ("msg", "c", "d", "Apply(Verify: m0 through m3)", False),
                     ("note", "c", "d", ["serving with 4 members"], "green"),
                 ],
             ),
@@ -479,11 +488,11 @@ def phases():
         s.text(x + 100, 190, line, 13, color=C["muted"], anchor="middle")
     s.arrow([(270, 172), (450, 172)], C["green"], "every member is up", (360, 162))
     s.arrow([(650, 158), (830, 158)], C["amber"], "a fault", (740, 148))
-    s.arrow([(830, 192), (650, 192)], C["green"], "repaired", (740, 212))
+    s.arrow([(830, 192), (650, 192)], C["green"], "Decide: Healthy", (740, 212))
     s.arrow([(550, 214), (550, 270), (200, 270), (200, 214)], C["red"])
     s.arrow([(930, 214), (930, 310), (140, 310), (140, 214)], C["red"])
-    s.text(375, 262, "reset the group", 13, color=C["red"], bold=True, anchor="middle")
-    s.text(535, 302, "reset the group: it cannot be repaired in place", 13, color=C["red"], bold=True, anchor="middle")
+    s.text(375, 262, "Decide: RecreateGroup", 13, color=C["red"], bold=True, anchor="middle")
+    s.text(535, 302, "Decide: RecreateGroup", 13, color=C["red"], bold=True, anchor="middle")
     s.legend(
         360,
         [
@@ -522,7 +531,7 @@ def adopt():
         size=13.5,
     )
     s.box(740, 210, 260, 72, "Same group", ["compare Pod by Pod"], tone="green", center=True)
-    s.box(740, 330, 260, 72, "New group", ["clear the journal, go to starting"], tone="red", center=True)
+    s.box(740, 330, 260, 72, "New group", ["clear membership; retain budget"], tone="red", center=True)
     s.arrow([(280, 128), (360, 128)], C["blue"])
     s.arrow([(660, 128), (740, 128)], C["grey"], "yes", (700, 120))
     s.arrow([(510, 164), (510, 250)], C["blue"], "no", (520, 212), anchor="start")
@@ -533,41 +542,62 @@ def adopt():
 
 def capacity():
     s = Svg(
-        1100, 500, "Restoring capacity", "a Pod holds only excluded members · --ft-capacity-restore picks what happens"
+        1100,
+        570,
+        "Restoring capacity",
+        "engine policy requests resources; controller selects the workload operation",
     )
-    s.box(390, 92, 320, 56, "Pod with only excluded members", [], tone="red", center=True)
+    s.box(
+        350,
+        92,
+        400,
+        70,
+        "Decide(input)",
+        ["members, observation, policy state, result"],
+        tone="green",
+        center=True,
+    )
     cols = [
-        ("reset-pod  (default)", 60, "Reset the Pod", "tried once", "green"),
-        ("reset-all", 400, "ResetAll", "the whole group restarts", "amber"),
-        ("release", 740, "Release the Pod", "the workload gives it back", "grey"),
+        ("admit a candidate", 40, "Change: Add", "driver resumes native admission", "green"),
+        ("request resources", 390, "ReplaceMembers", "names excluded or rejected members", "amber"),
+        ("keep reduced capacity", 740, "Healthy", "controller confirms serving", "grey"),
     ]
-    for label, x, act, note, tone in cols:
-        s.arrow([(550, 148), (550, 180), (x + 150, 180), (x + 150, 222)], C["blue"])
-        s.text(x + 150, 212, label, 12.5, color=C["blue"], bold=True, anchor="middle")
-        s.box(x, 222, 300, 64, act, [note], tone=tone, center=True)
-    s.box(40, 380, 160, 64, "Full again", [], tone="green", center=True)
-    s.box(220, 380, 160, 64, "Fewer members", ["Pod kept as it is"], tone="grey", center=True)
-    s.box(400, 380, 300, 64, "Full again", ["after a fresh start"], tone="green", center=True)
-    s.box(740, 380, 300, 64, "Fewer members", ["until the group restarts"], tone="grey", center=True)
-    s.arrow([(170, 286), (170, 330), (120, 330), (120, 380)], C["green"], "joined", (128, 352), anchor="start")
-    s.arrow(
-        [(250, 286), (250, 330), (300, 330), (300, 380)],
-        C["grey"],
-        ["unsupported,", "or join fails"],
-        (308, 346),
-        anchor="start",
+    for label, x, action, note, tone in cols:
+        s.arrow([(550, 162), (550, 190), (x + 160, 190), (x + 160, 235)], C["blue"])
+        s.text(x + 160, 225, label, 12.5, color=C["blue"], bold=True, anchor="middle")
+        s.box(x, 235, 320, 72, action, [note], tone=tone, center=True)
+    s.box(
+        220,
+        360,
+        660,
+        82,
+        "Controller selects and saves the workload action",
+        ["capacity preference + Grow + safe Pod UIDs", "Reset, Release, ResetAll, or retain reduced capacity"],
+        tone="blue",
+        center=True,
     )
-    s.arrow([(550, 286), (550, 380)], C["green"])
-    s.arrow([(890, 286), (890, 380)], C["grey"])
-    s.legend(480, [("active", "green", "full group"), ("grey", "grey", "serving below full")])
+    s.arrow([(550, 307), (550, 360)], C["blue"])
+    s.box(
+        220,
+        480,
+        660,
+        56,
+        "The saved result feeds the next decision",
+        ["every new mutation must fit the durable recovery budget"],
+        tone="grey",
+        center=True,
+    )
+    s.arrow([(550, 442), (550, 480)], C["blue"])
     s.save("capacity.svg")
 
 
 def engine():
-    s = Svg(1000, 300, "The engine plugin", "the policy decides from what the driver read · only the driver does I/O")
+    s = Svg(
+        1000, 300, "The engine plugin", "policy uses observation, checkpoint and result; driver executes engine actions"
+    )
     s.box(40, 130, 180, 64, "Controller", [], tone="blue", center=True)
-    s.box(390, 92, 220, 64, "Driver", ["Observe, Probe, Apply, Verify"], tone="green", center=True)
-    s.box(390, 196, 220, 64, "Policy", ["Plan, Progress · pure"], tone="green", center=True)
+    s.box(390, 92, 220, 64, "Driver", ["Observe, resumable Apply"], tone="green", center=True)
+    s.box(390, 196, 220, 64, "Policy", ["Decide - pure"], tone="green", center=True)
     s.box(760, 92, 200, 64, "Engine runtime", ["FT API"], tone="green", center=True)
     s.arrow(
         [(220, 150), (300, 150), (300, 124), (390, 124)],
@@ -576,7 +606,7 @@ def engine():
         (230, 114),
         anchor="start",
     )
-    s.arrow([(220, 174), (300, 174), (300, 228), (390, 228)], C["blue"], "decisions", (310, 250), anchor="start")
+    s.arrow([(220, 174), (300, 174), (300, 228), (390, 228)], C["blue"], "state, result", (310, 250), anchor="start")
     s.arrow([(610, 124), (760, 124)], C["green"], "HTTP", (685, 116))
     s.arrow([(500, 156), (500, 196)], C["green"], "private engine data", (510, 182), dash="6 4", anchor="start")
     s.save("engine.svg")

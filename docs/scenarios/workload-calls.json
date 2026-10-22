@@ -150,7 +150,7 @@
     {
       "t": "unsupported",
       "title": "A call the workload cannot do",
-      "note": "For example, replacing the leader alone. Nothing changes, and the controller asks for each Pod alone.",
+      "note": "For example, replacing the leader alone. Nothing changes. The failed result lets policy choose smaller targets or keep reduced capacity.",
       "calls": [
         {
           "to": "workload",

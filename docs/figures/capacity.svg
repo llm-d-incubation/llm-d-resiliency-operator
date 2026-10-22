@@ -1,51 +1,37 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="500" viewBox="0 0 1100 500" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="570" viewBox="0 0 1100 570" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
 <rect width="100%" height="100%" rx="8" fill="#ffffff"/>
 <text x="32.0" y="42.0" font-size="20" fill="#202124" text-anchor="start" font-weight="700" xml:space="preserve">Restoring capacity</text>
-<text x="32.0" y="66.0" font-size="13" fill="#5f6368" text-anchor="start" xml:space="preserve">a Pod holds only excluded members · --ft-capacity-restore picks what happens</text>
-<rect x="390.0" y="92.0" width="320.0" height="56.0" rx="6" fill="#fce8e6" stroke="#d93025" stroke-width="2"/>
-<text x="550.0" y="125.0" font-size="14" fill="#d93025" text-anchor="middle" font-weight="700" xml:space="preserve">Pod with only excluded members</text>
-<path d="M 550.0 148.0 L 550.0 180.0 L 210.0 180.0 L 210.0 222.0" fill="none" stroke="#1a73e8" stroke-width="1.8"/>
-<polygon points="210.0,222.0 206.1,212.8 213.9,212.8" fill="#1a73e8"/>
-<text x="210.0" y="212.0" font-size="12.5" fill="#1a73e8" text-anchor="middle" font-weight="700" xml:space="preserve">reset-pod  (default)</text>
-<rect x="60.0" y="222.0" width="300.0" height="64.0" rx="6" fill="#e6f4ea" stroke="#1e8e3e" stroke-width="2"/>
-<text x="210.0" y="250.0" font-size="14" fill="#1e8e3e" text-anchor="middle" font-weight="700" xml:space="preserve">Reset the Pod</text>
-<text x="210.0" y="270.0" font-size="12.5" fill="#5f6368" text-anchor="middle" xml:space="preserve">tried once</text>
-<path d="M 550.0 148.0 L 550.0 180.0 L 550.0 180.0 L 550.0 222.0" fill="none" stroke="#1a73e8" stroke-width="1.8"/>
-<polygon points="550.0,222.0 546.1,212.8 553.9,212.8" fill="#1a73e8"/>
-<text x="550.0" y="212.0" font-size="12.5" fill="#1a73e8" text-anchor="middle" font-weight="700" xml:space="preserve">reset-all</text>
-<rect x="400.0" y="222.0" width="300.0" height="64.0" rx="6" fill="#fef7e0" stroke="#f29900" stroke-width="2"/>
-<text x="550.0" y="250.0" font-size="14" fill="#f29900" text-anchor="middle" font-weight="700" xml:space="preserve">ResetAll</text>
-<text x="550.0" y="270.0" font-size="12.5" fill="#5f6368" text-anchor="middle" xml:space="preserve">the whole group restarts</text>
-<path d="M 550.0 148.0 L 550.0 180.0 L 890.0 180.0 L 890.0 222.0" fill="none" stroke="#1a73e8" stroke-width="1.8"/>
-<polygon points="890.0,222.0 886.1,212.8 893.9,212.8" fill="#1a73e8"/>
-<text x="890.0" y="212.0" font-size="12.5" fill="#1a73e8" text-anchor="middle" font-weight="700" xml:space="preserve">release</text>
-<rect x="740.0" y="222.0" width="300.0" height="64.0" rx="6" fill="#f1f3f4" stroke="#5f6368" stroke-width="2"/>
-<text x="890.0" y="250.0" font-size="14" fill="#5f6368" text-anchor="middle" font-weight="700" xml:space="preserve">Release the Pod</text>
-<text x="890.0" y="270.0" font-size="12.5" fill="#5f6368" text-anchor="middle" xml:space="preserve">the workload gives it back</text>
-<rect x="40.0" y="380.0" width="160.0" height="64.0" rx="6" fill="#e6f4ea" stroke="#1e8e3e" stroke-width="2"/>
-<text x="120.0" y="417.0" font-size="14" fill="#1e8e3e" text-anchor="middle" font-weight="700" xml:space="preserve">Full again</text>
-<rect x="220.0" y="380.0" width="160.0" height="64.0" rx="6" fill="#f1f3f4" stroke="#5f6368" stroke-width="2"/>
-<text x="300.0" y="408.0" font-size="14" fill="#5f6368" text-anchor="middle" font-weight="700" xml:space="preserve">Fewer members</text>
-<text x="300.0" y="428.0" font-size="12.5" fill="#5f6368" text-anchor="middle" xml:space="preserve">Pod kept as it is</text>
-<rect x="400.0" y="380.0" width="300.0" height="64.0" rx="6" fill="#e6f4ea" stroke="#1e8e3e" stroke-width="2"/>
-<text x="550.0" y="408.0" font-size="14" fill="#1e8e3e" text-anchor="middle" font-weight="700" xml:space="preserve">Full again</text>
-<text x="550.0" y="428.0" font-size="12.5" fill="#5f6368" text-anchor="middle" xml:space="preserve">after a fresh start</text>
-<rect x="740.0" y="380.0" width="300.0" height="64.0" rx="6" fill="#f1f3f4" stroke="#5f6368" stroke-width="2"/>
-<text x="890.0" y="408.0" font-size="14" fill="#5f6368" text-anchor="middle" font-weight="700" xml:space="preserve">Fewer members</text>
-<text x="890.0" y="428.0" font-size="12.5" fill="#5f6368" text-anchor="middle" xml:space="preserve">until the group restarts</text>
-<path d="M 170.0 286.0 L 170.0 330.0 L 120.0 330.0 L 120.0 380.0" fill="none" stroke="#1e8e3e" stroke-width="1.8"/>
-<polygon points="120.0,380.0 116.1,370.8 123.9,370.8" fill="#1e8e3e"/>
-<text x="128.0" y="352.0" font-size="12" fill="#1e8e3e" text-anchor="start" xml:space="preserve">joined</text>
-<path d="M 250.0 286.0 L 250.0 330.0 L 300.0 330.0 L 300.0 380.0" fill="none" stroke="#5f6368" stroke-width="1.8"/>
-<polygon points="300.0,380.0 296.1,370.8 303.9,370.8" fill="#5f6368"/>
-<text x="308.0" y="346.0" font-size="12" fill="#5f6368" text-anchor="start" xml:space="preserve">unsupported,</text>
-<text x="308.0" y="362.0" font-size="12" fill="#5f6368" text-anchor="start" xml:space="preserve">or join fails</text>
-<path d="M 550.0 286.0 L 550.0 380.0" fill="none" stroke="#1e8e3e" stroke-width="1.8"/>
-<polygon points="550.0,380.0 546.1,370.8 553.9,370.8" fill="#1e8e3e"/>
-<path d="M 890.0 286.0 L 890.0 380.0" fill="none" stroke="#5f6368" stroke-width="1.8"/>
-<polygon points="890.0,380.0 886.1,370.8 893.9,370.8" fill="#5f6368"/>
-<rect x="32.0" y="467.0" width="26.0" height="16.0" rx="3" fill="#e6f4ea" stroke="#1e8e3e" stroke-width="2"/>
-<text x="66.0" y="480.0" font-size="12.5" fill="#5f6368" text-anchor="start" xml:space="preserve">full group</text>
-<rect x="164.8" y="467.0" width="26.0" height="16.0" rx="3" fill="#f1f3f4" stroke="#5f6368" stroke-width="2"/>
-<text x="198.8" y="480.0" font-size="12.5" fill="#5f6368" text-anchor="start" xml:space="preserve">serving below full</text>
+<text x="32.0" y="66.0" font-size="13" fill="#5f6368" text-anchor="start" xml:space="preserve">engine policy requests resources; controller selects the workload operation</text>
+<rect x="350.0" y="92.0" width="400.0" height="70.0" rx="6" fill="#e6f4ea" stroke="#1e8e3e" stroke-width="2"/>
+<text x="550.0" y="123.0" font-size="14" fill="#1e8e3e" text-anchor="middle" font-weight="700" xml:space="preserve">Decide(input)</text>
+<text x="550.0" y="143.0" font-size="12.5" fill="#5f6368" text-anchor="middle" xml:space="preserve">members, observation, policy state, result</text>
+<path d="M 550.0 162.0 L 550.0 190.0 L 200.0 190.0 L 200.0 235.0" fill="none" stroke="#1a73e8" stroke-width="1.8"/>
+<polygon points="200.0,235.0 196.1,225.8 203.9,225.8" fill="#1a73e8"/>
+<text x="200.0" y="225.0" font-size="12.5" fill="#1a73e8" text-anchor="middle" font-weight="700" xml:space="preserve">admit a candidate</text>
+<rect x="40.0" y="235.0" width="320.0" height="72.0" rx="6" fill="#e6f4ea" stroke="#1e8e3e" stroke-width="2"/>
+<text x="200.0" y="267.0" font-size="14" fill="#1e8e3e" text-anchor="middle" font-weight="700" xml:space="preserve">Change: Add</text>
+<text x="200.0" y="287.0" font-size="12.5" fill="#5f6368" text-anchor="middle" xml:space="preserve">driver resumes native admission</text>
+<path d="M 550.0 162.0 L 550.0 190.0 L 550.0 190.0 L 550.0 235.0" fill="none" stroke="#1a73e8" stroke-width="1.8"/>
+<polygon points="550.0,235.0 546.1,225.8 553.9,225.8" fill="#1a73e8"/>
+<text x="550.0" y="225.0" font-size="12.5" fill="#1a73e8" text-anchor="middle" font-weight="700" xml:space="preserve">request resources</text>
+<rect x="390.0" y="235.0" width="320.0" height="72.0" rx="6" fill="#fef7e0" stroke="#f29900" stroke-width="2"/>
+<text x="550.0" y="267.0" font-size="14" fill="#f29900" text-anchor="middle" font-weight="700" xml:space="preserve">ReplaceMembers</text>
+<text x="550.0" y="287.0" font-size="12.5" fill="#5f6368" text-anchor="middle" xml:space="preserve">names excluded or rejected members</text>
+<path d="M 550.0 162.0 L 550.0 190.0 L 900.0 190.0 L 900.0 235.0" fill="none" stroke="#1a73e8" stroke-width="1.8"/>
+<polygon points="900.0,235.0 896.1,225.8 903.9,225.8" fill="#1a73e8"/>
+<text x="900.0" y="225.0" font-size="12.5" fill="#1a73e8" text-anchor="middle" font-weight="700" xml:space="preserve">keep reduced capacity</text>
+<rect x="740.0" y="235.0" width="320.0" height="72.0" rx="6" fill="#f1f3f4" stroke="#5f6368" stroke-width="2"/>
+<text x="900.0" y="267.0" font-size="14" fill="#5f6368" text-anchor="middle" font-weight="700" xml:space="preserve">Healthy</text>
+<text x="900.0" y="287.0" font-size="12.5" fill="#5f6368" text-anchor="middle" xml:space="preserve">controller confirms serving</text>
+<rect x="220.0" y="360.0" width="660.0" height="82.0" rx="6" fill="#e8f0fe" stroke="#1a73e8" stroke-width="2"/>
+<text x="550.0" y="388.0" font-size="14" fill="#1a73e8" text-anchor="middle" font-weight="700" xml:space="preserve">Controller selects and saves the workload action</text>
+<text x="550.0" y="408.0" font-size="12.5" fill="#5f6368" text-anchor="middle" xml:space="preserve">capacity preference + Grow + safe Pod UIDs</text>
+<text x="550.0" y="426.0" font-size="12.5" fill="#5f6368" text-anchor="middle" xml:space="preserve">Reset, Release, ResetAll, or retain reduced capacity</text>
+<path d="M 550.0 307.0 L 550.0 360.0" fill="none" stroke="#1a73e8" stroke-width="1.8"/>
+<polygon points="550.0,360.0 546.1,350.8 553.9,350.8" fill="#1a73e8"/>
+<rect x="220.0" y="480.0" width="660.0" height="56.0" rx="6" fill="#f1f3f4" stroke="#5f6368" stroke-width="2"/>
+<text x="550.0" y="504.0" font-size="14" fill="#5f6368" text-anchor="middle" font-weight="700" xml:space="preserve">The saved result feeds the next decision</text>
+<text x="550.0" y="524.0" font-size="12.5" fill="#5f6368" text-anchor="middle" xml:space="preserve">every new mutation must fit the durable recovery budget</text>
+<path d="M 550.0 442.0 L 550.0 480.0" fill="none" stroke="#1a73e8" stroke-width="1.8"/>
+<polygon points="550.0,480.0 546.1,470.8 553.9,470.8" fill="#1a73e8"/>
 </svg>

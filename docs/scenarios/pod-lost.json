@@ -38,7 +38,7 @@
       "calls": [
         {
           "to": "policy",
-          "call": "Plan(...)",
+          "call": "Decide(...)",
           "out": "Healthy"
         }
       ]
@@ -71,7 +71,7 @@
         {
           "to": "driver",
           "call": "Observe(pods)",
-          "out": "m0, m1, m2 paused \u00b7 nothing from pod-3"
+          "out": "m0, m1, m2 paused · nothing from pod-3"
         }
       ],
       "journal": "m3@idD added to the observation as terminal: pod lost"
@@ -82,13 +82,13 @@
       "calls": [
         {
           "to": "policy",
-          "call": "Plan(...)",
+          "call": "Decide(...)",
           "out": "Change: remove m3@idD"
         },
         {
           "to": "driver",
-          "call": "Apply(observation, reconfig)",
-          "out": "m0, m1, m2 accept"
+          "call": "Apply(saved operation, fresh observation)",
+          "out": "Running; m0, m1, m2 accepted"
         }
       ]
     },
@@ -111,14 +111,29 @@
       },
       "calls": [
         {
-          "to": "policy",
-          "call": "Progress(...)",
+          "to": "driver",
+          "call": "Apply(...)",
           "out": "Succeeded"
         },
         {
+          "to": "policy",
+          "call": "Decide(input)",
+          "out": "Verify"
+        },
+        {
+          "to": "journal",
+          "call": "Save(record)",
+          "out": "operation, policy checkpoint and attempted marker"
+        },
+        {
           "to": "driver",
-          "call": "Verify(observation, [m0, m1, m2])",
+          "call": "Apply(Verify: observation, [m0, m1, m2])",
           "out": "inference works"
+        },
+        {
+          "to": "journal",
+          "call": "Save(record)",
+          "out": "completed result for the next Decide"
         }
       ]
     },
@@ -141,7 +156,7 @@
         },
         {
           "to": "policy",
-          "call": "Plan(...)",
+          "call": "Decide(...)",
           "out": "Change: add m3@idD2"
         }
       ]
@@ -156,8 +171,8 @@
       },
       "calls": [
         {
-          "to": "policy",
-          "call": "Progress(...)",
+          "to": "driver",
+          "call": "Apply(...)",
           "out": "Succeeded"
         }
       ]

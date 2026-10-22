@@ -38,7 +38,7 @@
       "calls": [
         {
           "to": "policy",
-          "call": "Plan(...)",
+          "call": "Decide(...)",
           "out": "Healthy"
         }
       ]
@@ -68,13 +68,28 @@
           "out": "all paused, none terminal"
         },
         {
+          "to": "policy",
+          "call": "Decide(input)",
+          "out": "Probe"
+        },
+        {
+          "to": "journal",
+          "call": "Save(record)",
+          "out": "operation, policy checkpoint and attempted marker"
+        },
+        {
           "to": "driver",
-          "call": "Probe(observation)",
+          "call": "Apply(Probe: observation)",
           "out": "fails: no member answers a request"
         },
         {
+          "to": "journal",
+          "call": "Save(record)",
+          "out": "completed result for the next Decide"
+        },
+        {
           "to": "policy",
-          "call": "Plan(...)",
+          "call": "Decide(...)",
           "out": "Wait: the engine is still diagnosing"
         }
       ],
@@ -87,7 +102,7 @@
       "calls": [
         {
           "to": "policy",
-          "call": "Plan(...)",
+          "call": "Decide(...)",
           "out": "Wait"
         }
       ]
@@ -110,6 +125,16 @@
         }
       },
       "calls": [
+        {
+          "to": "policy",
+          "call": "Decide(input)",
+          "out": "RecreateGroup"
+        },
+        {
+          "to": "journal",
+          "call": "Save(record)",
+          "out": "operation, policy checkpoint and attempted marker"
+        },
         {
           "to": "workload",
           "call": "ResetAll([pod-0 ... pod-3])",
@@ -148,7 +173,7 @@
         },
         {
           "to": "policy",
-          "call": "Plan(...)",
+          "call": "Decide(...)",
           "out": "Healthy"
         }
       ]

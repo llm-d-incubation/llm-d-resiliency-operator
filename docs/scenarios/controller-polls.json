@@ -15,37 +15,40 @@
       "calls": [
         {"to": "workload", "call": "Discover()", "out": "4 Pods Ready"},
         {"to": "driver", "call": "Observe(pods)", "out": "all Serving"},
-        {"to": "policy", "call": "Plan(observation, admitted, candidates)", "out": "Healthy"}
+        {"to": "policy", "call": "Decide(input)", "out": "Healthy"}
       ]
     },
     {
       "t": "poll 2",
-      "title": "A fault: enter recovering, probe once",
+      "title": "Policy chooses a probe",
       "phase": "recovering",
       "pods": {"pod-0": {"m0": "paused"}, "pod-1": {"m1": "paused"}, "pod-2": {"m2": "paused"}, "pod-3": {"m3": "dead"}},
       "calls": [
         {"to": "driver", "call": "Observe(pods)", "out": "m3 Terminal, m0-m2 paused"},
-        {"to": "policy", "call": "Plan(observation, admitted, candidates)", "out": "Change, remove m3@idD"},
-        {"to": "journal", "call": "Save(record)", "in": "phase recovering"},
-        {"to": "driver", "call": "Probe(observation)"}
+        {"to": "policy", "call": "Decide(input)", "out": "Probe; State: fault started"},
+        {"to": "journal", "call": "Save(record)", "in": "Probe operation, policy checkpoint and attempted marker"},
+        {"to": "driver", "call": "Apply(Probe: observation)"},
+        {"to": "journal", "call": "Save(record)", "out": "Probe result"}
       ]
     },
     {
       "t": "poll 3",
-      "title": "Wait: under 2 polls in recovering",
+      "title": "Policy waits for diagnosis",
       "note": "The engine gets a moment to finish its own diagnosis before IRO acts.",
       "phase": "recovering",
-      "calls": [{"to": "policy", "call": "Plan(...)", "out": "Change, remove m3@idD"}]
+      "calls": [
+        {"to": "policy", "call": "Decide(...)", "out": "Wait; preserve the diagnosis start in State"}
+      ]
     },
     {
       "t": "poll 4",
       "title": "Check, save, send",
       "phase": "recovering",
       "calls": [
-        {"to": "policy", "call": "Plan(...)", "out": "Change, remove m3@idD · passes C1-C7"},
-        {"to": "journal", "call": "Save(record)", "in": "reconfig iro-ft-7c1e"},
-        {"to": "driver", "call": "Apply(observation, reconfig)", "out": "m0, m1, m2 accept"},
-        {"to": "journal", "call": "Save(record)", "in": "acceptances"}
+        {"to": "policy", "call": "Decide(...)", "out": "Change: remove m3@idD"},
+        {"to": "journal", "call": "Save(record)", "in": "Change operation iro-ft-7c1e and policy checkpoint"},
+        {"to": "driver", "call": "Apply(saved operation, fresh observation)", "out": "Running; m0, m1, m2 accepted"},
+        {"to": "journal", "call": "Save(record)", "in": "Running report and execution checkpoint"}
       ],
       "journal": "recovering · reconfig iro-ft-7c1e: remove m3@idD"
     },
@@ -55,44 +58,59 @@
       "phase": "recovering",
       "calls": [
         {"to": "driver", "call": "Observe(pods)", "out": "survivors rebuilding"},
-        {"to": "policy", "call": "Progress(observation, reconfig)", "out": "Running, under the apply deadline"}
+        {"to": "driver", "call": "Apply(saved operation, fresh observation)", "out": "Running, under the apply deadline"}
       ]
     },
     {
       "t": "poll 6",
-      "title": "Done: exclude m3, verify the survivors",
-      "phase": "serving",
+      "title": "Removal succeeds; save the outcome",
+      "phase": "recovering",
       "pods": {"pod-0": {"m0": "serving"}, "pod-1": {"m1": "serving"}, "pod-2": {"m2": "serving"}, "pod-3": {"m3": "excluded"}},
       "calls": [
-        {"to": "policy", "call": "Progress(observation, reconfig)", "out": "Succeeded"},
-        {"to": "driver", "call": "Verify(observation, [m0, m1, m2])", "out": "inference works"}
+        {"to": "driver", "call": "Apply(saved operation, fresh observation)", "out": "Succeeded"},
+        {"to": "journal", "call": "Save(record)", "out": "m3 excluded; result iro-ft-7c1e Succeeded"}
       ],
-      "journal": "serving · excluded m3@idD"
+      "journal": "recovering; no operation in flight; removal result saved"
     },
     {
       "t": "poll 7",
-      "title": "pod-3 holds only excluded members: reset it",
-      "phase": "serving",
+      "title": "Policy selects survivor verification",
+      "phase": "recovering",
       "calls": [
-        {"to": "policy", "call": "Plan(...)", "out": "Healthy"},
-        {"to": "journal", "call": "Save(record)", "in": "pod-3 Removing"},
-        {"to": "workload", "call": "Reset([pod-3 d1])"}
+        {"to": "policy", "call": "Decide(input)", "out": "Verify: m0, m1, m2"},
+        {"to": "journal", "call": "Save(record)", "out": "Verify operation, policy checkpoint and attempted marker"},
+        {"to": "driver", "call": "Apply(Verify: observation, [m0, m1, m2])", "out": "inference works"},
+        {"to": "journal", "call": "Save(record)", "out": "Verify result Succeeded"}
       ]
     },
     {
       "t": "poll 8",
-      "title": "pod-3 terminates",
+      "title": "pod-3 holds only excluded members: reset it",
       "phase": "serving",
-      "pods": {"pod-3": {"gone": true}},
-      "calls": [{"to": "workload", "call": "Discover()", "out": "pod-3 (d1) Terminating"}]
+      "calls": [
+        {"to": "policy", "call": "Decide(...)", "out": "ReplaceMembers: Members m3@idD; State: capacity attempt recorded"},
+        {"to": "journal", "call": "Save(record)", "in": "ReplaceMembers operation, policy checkpoint and pod-3 Removing"},
+        {"to": "workload", "call": "Reset([pod-3 d1])"}
+      ]
     },
     {
       "t": "poll 9",
+      "title": "pod-3 terminates",
+      "phase": "serving",
+      "pods": {"pod-3": {"gone": true}},
+      "calls": [
+        {"to": "workload", "call": "Discover()", "out": "pod-3 (d1) Terminating"}
+      ]
+    },
+    {
+      "t": "poll 10",
       "title": "The new pod-3 starts",
       "note": "No deadline: loading takes as long as it takes.",
       "phase": "serving",
       "pods": {"pod-3": {"uid": "d2", "gone": false, "m3": "starting"}},
-      "calls": [{"to": "workload", "call": "Discover()", "out": "pod-3 (d2) Starting"}],
+      "calls": [
+        {"to": "workload", "call": "Discover()", "out": "pod-3 (d2) Starting"}
+      ],
       "journal": "saves the new Pod, forgets d1 and m3@idD"
     },
     {
@@ -102,18 +120,23 @@
       "pods": {"pod-3": {"m3": "joining"}},
       "calls": [
         {"to": "driver", "call": "Observe(pods)", "out": "m3 on d2 Joinable"},
-        {"to": "policy", "call": "Plan(...)", "out": "Change, add m3@idD2"},
-        {"to": "driver", "call": "Apply(observation, reconfig)", "out": "all accept"}
+        {"to": "policy", "call": "Decide(...)", "out": "Change, add m3@idD2"},
+        {"to": "driver", "call": "Apply(saved operation, fresh observation)", "out": "Running; all accepted"}
       ]
     },
     {
       "t": "later",
-      "title": "Full again",
+      "title": "Admission succeeds; policy verifies the expanded group",
       "phase": "serving",
       "pods": {"pod-3": {"m3": "serving"}},
       "calls": [
-        {"to": "policy", "call": "Progress(...)", "out": "Succeeded"},
-        {"to": "driver", "call": "Verify(observation, [m3@idD2])", "out": "inference works"}
+        {"to": "driver", "call": "Apply(...)", "out": "Succeeded"},
+        {"to": "journal", "call": "Save(record)", "out": "admission result Succeeded"},
+        {"to": "policy", "call": "Decide(input)", "out": "Verify: admitted members"},
+        {"to": "journal", "call": "Save(record)", "out": "Verify operation, policy checkpoint and attempted marker"},
+        {"to": "driver", "call": "Apply(Verify: observation, [m0, m1, m2, m3@idD2])", "out": "inference works"},
+        {"to": "journal", "call": "Save(record)", "out": "Verify result Succeeded"},
+        {"to": "policy", "call": "Decide(input)", "out": "Healthy"}
       ],
       "journal": "serving · admitted m0@idA m1@idB m2@idC m3@idD2"
     }

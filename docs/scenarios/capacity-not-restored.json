@@ -43,13 +43,13 @@
       "calls": [
         {
           "to": "policy",
-          "call": "Plan(...)",
+          "call": "Decide(...)",
           "out": "Healthy"
         }
       ]
     },
     {
-      "title": "IRO resets pod-3, once",
+      "title": "Policy requests resources; controller selects Pod reset",
       "phase": "serving",
       "pods": {
         "pod-3": {
@@ -59,6 +59,16 @@
       },
       "calls": [
         {
+          "to": "policy",
+          "call": "Decide(input)",
+          "out": "ReplaceMembers: Members m3@idD"
+        },
+        {
+          "to": "journal",
+          "call": "Save(record)",
+          "out": "operation, policy checkpoint and attempted marker"
+        },
+        {
           "to": "workload",
           "call": "Reset([pod-3 d1])",
           "out": "pod-3 recreated with UID d2"
@@ -67,7 +77,7 @@
     },
     {
       "title": "The new member cannot join",
-      "note": "For example the engine cannot grow, or the join reconfig fails.",
+      "note": "The join fails after the engine has proven the survivors stayed unchanged.",
       "phase": "serving",
       "pods": {
         "pod-3": {
@@ -78,25 +88,32 @@
         {
           "to": "driver",
           "call": "Apply(add m3@idD2)",
-          "out": "accepted"
+          "out": "Running; accepted"
         },
         {
-          "to": "policy",
-          "call": "Progress(...)",
+          "to": "driver",
+          "call": "Apply(...)",
           "out": "Failed, scope Joiners: m3@idD2 could not join"
         }
       ]
     },
     {
       "title": "The group keeps serving with 3",
-      "note": "One try, no budget. m3@idD2 is rejected, so pod-3 is not tried again until the next group. With --ft-capacity-restore=reset-all IRO would reset the group instead.",
+      "note": "This policy stops capacity attempts after the recorded join failure and chooses Healthy at reduced capacity. A different policy can retry a new candidate or request RecreateGroup.",
       "phase": "serving",
       "pods": {
         "pod-3": {
           "m3": "excluded"
         }
       },
-      "journal": "serving \u00b7 admitted m0 m1 m2 \u00b7 rejected m3@idD2"
+      "journal": "serving · admitted m0 m1 m2 · rejected m3@idD2",
+      "calls": [
+        {
+          "to": "policy",
+          "call": "Decide(input)",
+          "out": "Healthy; State: capacity attempts stopped"
+        }
+      ]
     }
   ]
 }

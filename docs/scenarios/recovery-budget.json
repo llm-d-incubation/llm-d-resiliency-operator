@@ -1,0 +1,164 @@
+{
+  "title": "Repeated recovery reaches the controller limit",
+  "page": "failures/recovery-repeats",
+  "pods": [
+    {
+      "name": "pod-0",
+      "uid": "a1",
+      "members": {
+        "m0": "serving",
+        "m1": "serving",
+        "m2": "serving",
+        "m3": "serving"
+      }
+    }
+  ],
+  "steps": [
+    {
+      "title": "Remove the failed member",
+      "phase": "recovering",
+      "calls": [
+        {
+          "to": "policy",
+          "call": "Decide(input)",
+          "out": "Change: Remove m1@idA"
+        },
+        {
+          "to": "journal",
+          "call": "Save",
+          "out": "remove-1; RecoveryBudget Actions=1, MaxActions=3"
+        },
+        {
+          "to": "driver",
+          "call": "Apply(remove-1)",
+          "out": "Succeeded"
+        },
+        {
+          "to": "journal",
+          "call": "Save",
+          "out": "m1 excluded; remove-1 Succeeded"
+        }
+      ],
+      "pods": {
+        "pod-0": {
+          "m1": "excluded"
+        }
+      },
+      "note": "The example configures a three-action limit. Completed successful mutations consume budget too."
+    },
+    {
+      "title": "First replacement admission fails",
+      "phase": "serving",
+      "calls": [
+        {
+          "to": "policy",
+          "call": "Decide(input)",
+          "out": "Change: Add m1-process2@idA"
+        },
+        {
+          "to": "journal",
+          "call": "Save",
+          "out": "add-1; Actions=2"
+        },
+        {
+          "to": "driver",
+          "call": "Apply(add-1)",
+          "out": "Running"
+        },
+        {
+          "to": "driver",
+          "call": "Apply(add-1)",
+          "out": "Failed, Scope=Joiners"
+        },
+        {
+          "to": "journal",
+          "call": "Save",
+          "out": "candidate rejected; result add-1 Failed"
+        }
+      ],
+      "note": "Polling and driver stages retain Actions=2."
+    },
+    {
+      "title": "A different candidate fails too",
+      "phase": "serving",
+      "calls": [
+        {
+          "to": "policy",
+          "call": "Decide(input)",
+          "out": "Change: Add m1-process3@idA"
+        },
+        {
+          "to": "journal",
+          "call": "Save",
+          "out": "add-2; Actions=3"
+        },
+        {
+          "to": "driver",
+          "call": "Apply(add-2)",
+          "out": "Failed, Scope=Joiners"
+        },
+        {
+          "to": "journal",
+          "call": "Save",
+          "out": "candidate rejected; result add-2 Failed"
+        }
+      ]
+    },
+    {
+      "title": "Another mutation is blocked",
+      "phase": "serving",
+      "calls": [
+        {
+          "to": "policy",
+          "call": "Decide(input)",
+          "out": "Change: Add m1-process4@idA"
+        },
+        {
+          "to": "journal",
+          "call": "Save",
+          "out": "recovery blocked: action limit reached"
+        }
+      ],
+      "note": "The controller does not call Apply for the proposed action. Changing candidate names or requesting recreation cannot bypass the limit."
+    },
+    {
+      "title": "Leader reload preserves the limit",
+      "phase": "serving",
+      "calls": [
+        {
+          "to": "journal",
+          "call": "Load",
+          "out": "Actions=3, MaxActions=3, blocked reason"
+        },
+        {
+          "to": "driver",
+          "call": "Observe",
+          "out": "survivors still serving; replacement candidate present"
+        },
+        {
+          "to": "policy",
+          "call": "Decide(input)",
+          "out": "Healthy at reduced capacity"
+        }
+      ],
+      "note": "The saved policy state may stop earlier. The controller independently bounds the episode."
+    },
+    {
+      "title": "Sustained health permits a future recovery episode",
+      "phase": "serving",
+      "calls": [
+        {
+          "to": "policy",
+          "call": "Decide(input)",
+          "out": "Healthy throughout the configured stable interval"
+        },
+        {
+          "to": "journal",
+          "call": "Save",
+          "out": "clear recovery budget after confirmed stable serving"
+        }
+      ],
+      "note": "A brief Healthy report or lost observation cannot clear the budget. Pod and group recreation preserve it."
+    }
+  ]
+}

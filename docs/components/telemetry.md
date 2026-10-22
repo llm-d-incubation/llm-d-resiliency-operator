@@ -44,10 +44,11 @@ recreating a serving group.
 | `Affected`, `Pods`, `Nodes` | the terminal members when it opened (if none, those not serving), plus every member a reconfig removes, and where they ran |
 | `Reconfigs` | every reconfig sent for it, with its result |
 | `Outcome` | `Recovered` (same members), `Shrunk` (fewer members), `Reset` (IRO recreated the group), or `Recreated` (the workload did, on its own) |
-| `Durations` | diagnose (opened → first reconfig or reset), apply (reconfigs running), verify (checking the result), total |
+| `Durations` | diagnose (opened to first `Change` or `RecreateGroup`), apply (reconfigs running), verify (cumulative elapsed time of saved `Verify` operations), total |
 
 The controller keeps the open incident in its [`Record`](controller.md#objects), so a new leader continues the
-same incident and its timings. Closed incidents leave the record and go to telemetry.
+same incident and its timings. Closed incidents leave the record and go to telemetry. The durable
+[recovery budget](controller.md#bounding-repeated-recovery) is separate and can outlive an incident.
 
 ## What a recovery looks like
 
@@ -59,9 +60,9 @@ What a person sees while [a member dies](../failures/member-dies.md), in order:
 | | `PhaseChanged`: serving → recovering | `llm_d_iro_phase_transitions_total{from="serving",to="recovering"}` +1 |
 | the reconfig is sent | `ReconfigStarted`: `inc-7c1e: reconfig iro-ft-7c1e started: shrink, remove m3@idD` | |
 | it succeeds | `ReconfigSucceeded` | `llm_d_iro_reconfigs_total{change="shrink",outcome="succeeded"}` +1 |
-| | `PhaseChanged`: recovering → serving | `llm_d_iro_members{state="admitted"} 3`, `{state="excluded"} 1` |
-| `pod-3` is reset | `PodReset`: `resetting pod-3 to bring m3 back` | `llm_d_iro_pod_resets_total` +1 |
-| verified | `IncidentClosed`: `inc-7c1e: shrunk in 41s (diagnose 4s, apply 22s, verify 15s)` | `llm_d_iro_incidents_total{outcome="Shrunk"}` +1 |
+| verified; policy returns `Healthy` | `PhaseChanged`: recovering → serving | `llm_d_iro_members{state="admitted"} 3`, `{state="excluded"} 1` |
+| | `IncidentClosed`: `inc-7c1e: shrunk in 41s (diagnose 4s, apply 22s, verify 15s)` | `llm_d_iro_incidents_total{outcome="Shrunk"}` +1 |
+| operator selects `Reset` for `pod-3` | `PodReset`: `resetting pod-3 to bring m3 back` | `llm_d_iro_pod_resets_total` +1 |
 
 ## Logs
 
@@ -99,7 +100,7 @@ On the workload object, through the manager's `EventRecorder`. Every Event of an
 |---|---|---|
 | `IncidentOpened` | Warning | a fault opens an incident |
 | `PhaseChanged` | Normal | any phase change |
-| `ReconfigStarted` | Normal | a reconfig is sent, and again when it is resent (`resent: no member got it`) |
+| `ReconfigStarted` | Normal | a saved membership action begins execution |
 | `ReconfigSucceeded` / `ReconfigFailed` | Normal / Warning | a reconfig finishes |
 | `PodReset` | Normal | IRO resets Pods to bring their members back, once per call |
 | `PodsReleased` | Normal | IRO releases Pods and serves below full, once per call |
@@ -108,8 +109,8 @@ On the workload object, through the manager's `EventRecorder`. Every Event of an
 | `GroupUnseen` | Warning | the controller can no longer see the group |
 | `IncidentClosed` | Normal | the group serves again, or was reset |
 
-A workload call answered with `ErrUnsupported` emits only a log line. A list the workload cannot handle as a
-whole is not recorded; each Pod is then asked for, and recorded, alone.
+A workload call answered with `ErrUnsupported` emits only a log line. The failed batch is recorded as one
+operation result. The policy can select smaller targets in a later decision.
 
 ## Incident history
 
@@ -151,8 +152,8 @@ type Recorder interface {
     Stepped(record *Record, err error)
     PhaseChanged(from, to Phase, reason string)
     IncidentOpened(incident *Incident)
-    ReconfigStarted(reconfig *Reconfig, plan *Plan)
-    ReconfigFinished(reconfig *Reconfig, progress Progress)
+    ReconfigStarted(reconfig *Reconfig, action *Action)
+    ReconfigFinished(reconfig *Reconfig, report Report)
     PodResetRequested(pods []PodRef, err error)
     ResetAllRequested(reason ResetReason, pods []PodRef)
     ReleaseRequested(pods []PodRef, err error)
@@ -164,12 +165,18 @@ type Recorder interface {
 ```
 
 The code is in `internal/controller/enginefault/recorder.go`, next to the controller whose state it reports.
-`Record` and `Phase` come from the [controller](controller.md#objects); `Reconfig`, `Plan`, `Progress` and
+`Record` and `Phase` come from the [controller](controller.md#objects); `Reconfig`, `Action`, `Report` and
 `MemberID` from the [engine](engines/index.md#objects); `PodRef` from the [workload](workloads/index.md#objects).
 
-`ReconfigFinished` with `NotStarted` is a reconfig dropped because no member got it and it no longer passed the
-checks (outcome `dropped`). A reconfig ended by a reset or a new group finishes `Running`, with that as its
-reason.
+`ReconfigFinished` reports established terminal outcomes. An unresolved operation past its deadline stays
+pending; a timeout does not emit a fabricated failed result. A confirmed joiner-only failure reports
+`Failed` with scope `Joiners`.
+
+`Reconfig` is a telemetry view of a membership action: operation ID, participants, removals, additions and
+payload. Execution receives the full `Operation` through `ApplyInput`.
+
+`ResetAllRequested` uses the fixed category `policy`. The selected action's free-text reason remains in
+`Record.Reason`, outside metric labels.
 
 ### Objects
 
@@ -187,9 +194,17 @@ type Incident struct {
     Durations Durations
 }
 
+type Reconfig struct {
+    ID           string
+    Participants []MemberID
+    Remove       []MemberID
+    Add          []MemberID
+    Payload      json.RawMessage
+}
+
 type ReconfigResult struct {
     Reconfig Reconfig
-    Progress Progress
+    Report   Report
 }
 
 type Outcome string // Recovered | Shrunk | Reset | Recreated
@@ -202,5 +217,7 @@ type Durations struct {
 }
 
 // ResetReason is a fixed set, so it can be a metric label.
-type ResetReason string // unrecoverable | reconfig_failed | diagnosis_deadline | apply_deadline | flap | verify_failed | exclusion_broken | capacity | unseen
+type ResetReason string
+
+const ResetPolicy ResetReason = "policy"
 ```

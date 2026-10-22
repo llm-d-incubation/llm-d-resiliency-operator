@@ -2,47 +2,150 @@
   "title": "The leader dies mid-reconfig",
   "page": "failures/leader-dies",
   "pods": [
-    {"name": "pod-0", "uid": "a1", "members": {"m0": "serving"}},
-    {"name": "pod-1", "uid": "b1", "members": {"m1": "serving"}},
-    {"name": "pod-2", "uid": "c1", "members": {"m2": "serving"}},
-    {"name": "pod-3", "uid": "d1", "members": {"m3": "serving"}}
+    {
+      "name": "pod-0",
+      "uid": "a1",
+      "members": {
+        "m0": "serving"
+      }
+    },
+    {
+      "name": "pod-1",
+      "uid": "b1",
+      "members": {
+        "m1": "serving"
+      }
+    },
+    {
+      "name": "pod-2",
+      "uid": "c1",
+      "members": {
+        "m2": "serving"
+      }
+    },
+    {
+      "name": "pod-3",
+      "uid": "d1",
+      "members": {
+        "m3": "serving"
+      }
+    }
   ],
   "steps": [
     {
       "title": "m3 dies",
       "phase": "recovering",
-      "pods": {"pod-0": {"m0": "paused"}, "pod-1": {"m1": "paused"}, "pod-2": {"m2": "paused"}, "pod-3": {"m3": "dead"}},
-      "calls": [{"to": "policy", "call": "Plan(...)", "out": "Change: remove m3@idD"}]
+      "pods": {
+        "pod-0": {
+          "m0": "paused"
+        },
+        "pod-1": {
+          "m1": "paused"
+        },
+        "pod-2": {
+          "m2": "paused"
+        },
+        "pod-3": {
+          "m3": "dead"
+        }
+      },
+      "calls": [
+        {
+          "to": "policy",
+          "call": "Decide(...)",
+          "out": "Change: remove m3@idD"
+        }
+      ]
     },
     {
       "title": "The leader sends the reconfig, then dies",
       "phase": "recovering",
       "calls": [
-        {"to": "journal", "call": "Save(record)", "in": "reconfig iro-ft-1: remove m3@idD"},
-        {"to": "driver", "call": "Apply(observation, reconfig)", "out": "m0, m1, m2 accept"},
-        {"to": "journal", "call": "Save(record)", "in": "acceptances of iro-ft-1"}
+        {
+          "to": "journal",
+          "call": "Save",
+          "out": "iro-ft-1, immutable action, budget count and Attempted=true"
+        },
+        {
+          "to": "driver",
+          "call": "Apply(iro-ft-1, Attempted=false)",
+          "out": "Running; checkpoint records submitted operation"
+        },
+        {
+          "to": "journal",
+          "call": "Save",
+          "out": "execution checkpoint"
+        }
       ],
-      "journal": "recovering · reconfig iro-ft-1 accepted by m0 m1 m2"
+      "journal": "recovering; iro-ft-1 Attempted=true; original start time saved"
     },
     {
       "title": "A new leader takes over",
-      "note": "It learns everything from the journal and the engine. Acceptances are saved, so the send is confirmed and it does not send again. Without them, it sends the same ID again only if Progress says NotStarted.",
+      "note": "The driver uses fresh observation and the same operation ID to resume. A missing checkpoint cannot justify replaying an effect without remote readback or deduplication.",
       "phase": "recovering",
       "calls": [
-        {"to": "journal", "call": "Load()", "out": "recovering, reconfig iro-ft-1, accepted by m0 m1 m2"},
-        {"to": "driver", "call": "Observe(pods)", "out": "m0, m1, m2 running iro-ft-1"},
-        {"to": "policy", "call": "Progress(observation, reconfig)", "out": "Running"}
+        {
+          "to": "journal",
+          "call": "Load",
+          "out": "iro-ft-1, Attempted=true, checkpoint and recovery budget"
+        },
+        {
+          "to": "driver",
+          "call": "Observe",
+          "out": "members running iro-ft-1"
+        },
+        {
+          "to": "driver",
+          "call": "Apply(iro-ft-1, Attempted=true)",
+          "out": "Running; operation already submitted"
+        }
       ]
     },
     {
       "title": "The reconfig finishes under the new leader",
       "phase": "serving",
-      "pods": {"pod-0": {"m0": "serving"}, "pod-1": {"m1": "serving"}, "pod-2": {"m2": "serving"}, "pod-3": {"m3": "excluded"}},
+      "pods": {
+        "pod-0": {
+          "m0": "serving"
+        },
+        "pod-1": {
+          "m1": "serving"
+        },
+        "pod-2": {
+          "m2": "serving"
+        },
+        "pod-3": {
+          "m3": "excluded"
+        }
+      },
       "calls": [
-        {"to": "policy", "call": "Progress(observation, reconfig)", "out": "Succeeded"},
-        {"to": "driver", "call": "Verify(observation, [m0, m1, m2])", "out": "inference works"}
+        {
+          "to": "driver",
+          "call": "Apply(saved operation, fresh observation)",
+          "out": "Succeeded"
+        },
+        {
+          "to": "policy",
+          "call": "Decide(input)",
+          "out": "Verify"
+        },
+        {
+          "to": "journal",
+          "call": "Save(record)",
+          "out": "operation, policy checkpoint and attempted marker"
+        },
+        {
+          "to": "driver",
+          "call": "Apply(Verify: observation, [m0, m1, m2])",
+          "out": "inference works"
+        },
+        {
+          "to": "journal",
+          "call": "Save(record)",
+          "out": "completed result for the next Decide"
+        }
       ],
-      "journal": "serving · admitted m0 m1 m2 · excluded m3@idD"
+      "journal": "serving \u00b7 admitted m0 m1 m2 \u00b7 excluded m3@idD"
     }
   ]
 }

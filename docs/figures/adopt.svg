@@ -18,7 +18,7 @@
 <text x="870.0" y="262.0" font-size="12.5" fill="#5f6368" text-anchor="middle" xml:space="preserve">compare Pod by Pod</text>
 <rect x="740.0" y="330.0" width="260.0" height="72.0" rx="6" fill="#fce8e6" stroke="#d93025" stroke-width="2"/>
 <text x="870.0" y="362.0" font-size="14" fill="#d93025" text-anchor="middle" font-weight="700" xml:space="preserve">New group</text>
-<text x="870.0" y="382.0" font-size="12.5" fill="#5f6368" text-anchor="middle" xml:space="preserve">clear the journal, go to starting</text>
+<text x="870.0" y="382.0" font-size="12.5" fill="#5f6368" text-anchor="middle" xml:space="preserve">clear membership; retain budget</text>
 <path d="M 280.0 128.0 L 360.0 128.0" fill="none" stroke="#1a73e8" stroke-width="1.8"/>
 <polygon points="360.0,128.0 350.8,131.9 350.8,124.1" fill="#1a73e8"/>
 <path d="M 660.0 128.0 L 740.0 128.0" fill="none" stroke="#5f6368" stroke-width="1.8"/>

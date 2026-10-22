@@ -38,7 +38,7 @@
       "calls": [
         {
           "to": "policy",
-          "call": "Plan(...)",
+          "call": "Decide(...)",
           "out": "Healthy"
         }
       ]
@@ -73,7 +73,7 @@
         },
         {
           "to": "policy",
-          "call": "Plan(...)",
+          "call": "Decide(...)",
           "out": "Healthy"
         }
       ],

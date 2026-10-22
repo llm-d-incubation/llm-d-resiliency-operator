@@ -7,7 +7,7 @@
 <rect x="60.0" y="330.0" width="210.0" height="100.0" rx="6" fill="#e8f0fe" stroke="#1a73e8" stroke-width="2"/>
 <text x="74.0" y="354.0" font-size="14" fill="#202124" text-anchor="start" font-weight="700" xml:space="preserve">Controller</text>
 <text x="74.0" y="374.0" font-size="12.5" fill="#5f6368" text-anchor="start" xml:space="preserve">one step per poll</text>
-<text x="74.0" y="392.0" font-size="12.5" fill="#5f6368" text-anchor="start" xml:space="preserve">phases, deadlines, checks</text>
+<text x="74.0" y="392.0" font-size="12.5" fill="#5f6368" text-anchor="start" xml:space="preserve">saves, executes, checks</text>
 <rect x="540.0" y="140.0" width="260.0" height="66.0" rx="6" fill="#f1f3f4" stroke="#5f6368" stroke-width="2"/>
 <text x="554.0" y="164.0" font-size="14" fill="#202124" text-anchor="start" font-weight="700" xml:space="preserve">Journal</text>
 <text x="554.0" y="184.0" font-size="12.5" fill="#5f6368" text-anchor="start" xml:space="preserve">versioned record, Load / Save</text>
@@ -20,7 +20,7 @@
 <text x="554.0" y="424.0" font-size="12.5" fill="#5f6368" text-anchor="start" xml:space="preserve">one plugin per inference engine</text>
 <rect x="554.0" y="442.0" width="112.0" height="90.0" rx="6" fill="#ffffff" stroke="#1e8e3e" stroke-width="2"/>
 <text x="568.0" y="466.0" font-size="14" fill="#202124" text-anchor="start" font-weight="700" xml:space="preserve">Policy</text>
-<text x="568.0" y="486.0" font-size="12.5" fill="#5f6368" text-anchor="start" xml:space="preserve">pure: plans,</text>
+<text x="568.0" y="486.0" font-size="12.5" fill="#5f6368" text-anchor="start" xml:space="preserve">pure: decides</text>
 <text x="568.0" y="504.0" font-size="12.5" fill="#5f6368" text-anchor="start" xml:space="preserve">no I/O</text>
 <rect x="676.0" y="442.0" width="112.0" height="90.0" rx="6" fill="#ffffff" stroke="#1e8e3e" stroke-width="2"/>
 <text x="690.0" y="466.0" font-size="14" fill="#202124" text-anchor="start" font-weight="700" xml:space="preserve">Driver</text>
@@ -38,8 +38,8 @@
 <text x="284.0" y="352.0" font-size="12" fill="#1a73e8" text-anchor="start" xml:space="preserve">ResetAll, Release</text>
 <path d="M 270.0 400.0 L 470.0 400.0 L 470.0 465.0 L 540.0 465.0" fill="none" stroke="#1a73e8" stroke-width="1.8"/>
 <polygon points="540.0,465.0 530.8,468.9 530.8,461.1" fill="#1a73e8"/>
-<text x="284.0" y="422.0" font-size="12" fill="#1a73e8" text-anchor="start" xml:space="preserve">Observe, Probe, Apply,</text>
-<text x="284.0" y="438.0" font-size="12" fill="#1a73e8" text-anchor="start" xml:space="preserve">Verify · Plan, Progress</text>
+<text x="284.0" y="422.0" font-size="12" fill="#1a73e8" text-anchor="start" xml:space="preserve">Observe, Apply</text>
+<text x="284.0" y="438.0" font-size="12" fill="#1a73e8" text-anchor="start" xml:space="preserve">Decide</text>
 <path d="M 165.0 430.0 L 165.0 650.0 L 540.0 650.0" fill="none" stroke="#1a73e8" stroke-width="1.8"/>
 <polygon points="540.0,650.0 530.8,653.9 530.8,646.1" fill="#1a73e8"/>
 <text x="350.0" y="642.0" font-size="12" fill="#1a73e8" text-anchor="middle" xml:space="preserve">what happened</text>

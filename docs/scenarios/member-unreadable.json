@@ -38,7 +38,7 @@
       "calls": [
         {
           "to": "policy",
-          "call": "Plan(...)",
+          "call": "Decide(...)",
           "out": "Healthy"
         }
       ]
@@ -56,23 +56,23 @@
         {
           "to": "driver",
           "call": "Observe(pods)",
-          "out": "m0, m1, m3 serving \u00b7 m2 unknown"
+          "out": "m0, m1, m3 serving · m2 unknown"
         },
         {
           "to": "policy",
-          "call": "Plan(...)",
+          "call": "Decide(...)",
           "out": "Healthy, but with m2 unknown this counts as a fault"
         }
       ]
     },
     {
       "title": "IRO will not remove what it cannot see",
-      "note": "Removing m2 could break C1: the router may still send it traffic. A plan that names m2 is not sent.",
+      "note": "Removing m2 could break C1: the router may still send it traffic. An action that names m2 is not sent.",
       "phase": "recovering",
       "calls": [
         {
           "to": "policy",
-          "call": "Plan(...)",
+          "call": "Decide(...)",
           "out": "Wait"
         }
       ]
@@ -95,6 +95,16 @@
         }
       },
       "calls": [
+        {
+          "to": "policy",
+          "call": "Decide(input)",
+          "out": "RecreateGroup"
+        },
+        {
+          "to": "journal",
+          "call": "Save(record)",
+          "out": "operation, policy checkpoint and attempted marker"
+        },
         {
           "to": "workload",
           "call": "ResetAll([pod-0 ... pod-3])",
@@ -132,7 +142,7 @@
         },
         {
           "to": "policy",
-          "call": "Plan(...)",
+          "call": "Decide(...)",
           "out": "Healthy"
         }
       ]

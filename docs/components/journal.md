@@ -3,7 +3,8 @@
 ## What it does
 
 The journal keeps the controller's state for one engine group, so a new leader can pick up where the last one
-stopped. It answers "what was IRO doing?", not "which Pods exist" (that is the [workload](workloads/index.md)).
+stopped. It records the pending operation, policy checkpoint and last result. The
+[workload](workloads/index.md) reports which Pods exist.
 
 It stores bytes and never looks inside them. The schema is the controller's [`Record`](controller.md#objects).
 It is its own component, apart from the workload: the workload keeps no memory and the journal is all memory, a
@@ -19,9 +20,18 @@ set with several engine groups needs one record per group, and tests can fake it
 
 ## When the controller uses it
 
-The controller saves before it acts: before a reconfig, before a workload call, and on every phase change. It
-never acts on state it could not save, so a failed `Save` stops the step, and its phase in memory stays at the
-last saved one.
+The controller saves the exact action and policy checkpoint before dispatch. It saves the completed result
+before asking the policy for the next action. The policy interprets its checkpoint; the journal and controller
+store its JSON bytes without interpreting them. A failed save prevents the action or next decision.
+
+An operation keeps its ID, payload and original start time across leadership changes. The saved policy state
+also preserves retry history and diagnosis or verification start times, so a reload does not restart a strategy.
+
+The record has an explicit schema version. Loading an unversioned record, an unknown version, an invalid
+phase or a missing epoch fails. IRO keeps that record and retries loading; it does not erase pending work or
+reset the group to make an incompatible record load. Deployments with an existing journal must explicitly
+migrate its operation and recovery state, or arrange a fresh group and record after resolving the old work.
+Deleting an active record discards its operation and retry history.
 
 ## Reading the record
 
@@ -36,7 +46,7 @@ last saved one.
 
 ```go
 Load(ctx) // first run of IRO for this group: nil, "", nil. The controller starts a new group.
-Load(ctx) // after a leader change: {"phase":"recovering","reconfig":{"id":"iro-ft-7c1e",...},...}, "v42", nil
+Load(ctx) // after a leader change: {"phase":"recovering","operation":{"ID":"iro-ft-7c1e","Action":{...}},...}, "v42", nil
 ```
 
 A bad record does not stop the manager: if `Load` fails or the bytes do not parse, the runner logs it and tries

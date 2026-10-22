@@ -43,11 +43,11 @@
       "calls": [
         {
           "to": "policy",
-          "call": "Plan(...)",
+          "call": "Decide(...)",
           "out": "Healthy"
         }
       ],
-      "journal": "serving \u00b7 admitted m0 m1 m2 \u00b7 excluded m3@idD"
+      "journal": "serving · admitted m0 m1 m2 · excluded m3@idD"
     },
     {
       "title": "m1 dies too",
@@ -67,11 +67,11 @@
         {
           "to": "driver",
           "call": "Observe(pods)",
-          "out": "m1 terminal \u00b7 m0, m2 paused \u00b7 m3 still excluded"
+          "out": "m1 terminal · m0, m2 paused · m3 still excluded"
         },
         {
           "to": "policy",
-          "call": "Plan(...)",
+          "call": "Decide(...)",
           "in": "admitted m0, m1, m2",
           "out": "Change: remove m1@idB"
         }
@@ -83,7 +83,7 @@
       "calls": [
         {
           "to": "driver",
-          "call": "Apply(observation, reconfig)",
+          "call": "Apply(saved operation, fresh observation)",
           "in": "iro-ft-2 to m0, m2",
           "out": "m0, m2 accept"
         }
@@ -105,14 +105,29 @@
       },
       "calls": [
         {
-          "to": "policy",
-          "call": "Progress(...)",
+          "to": "driver",
+          "call": "Apply(...)",
           "out": "Succeeded"
         },
         {
+          "to": "policy",
+          "call": "Decide(input)",
+          "out": "Verify"
+        },
+        {
+          "to": "journal",
+          "call": "Save(record)",
+          "out": "operation, policy checkpoint and attempted marker"
+        },
+        {
           "to": "driver",
-          "call": "Verify(observation, [m0, m2])",
+          "call": "Apply(Verify: observation, [m0, m2])",
           "out": "inference works"
+        },
+        {
+          "to": "journal",
+          "call": "Save(record)",
+          "out": "completed result for the next Decide"
         }
       ]
     },
@@ -131,6 +146,16 @@
         }
       },
       "calls": [
+        {
+          "to": "policy",
+          "call": "Decide(input)",
+          "out": "ReplaceMembers"
+        },
+        {
+          "to": "journal",
+          "call": "Save(record)",
+          "out": "operation, policy checkpoint and attempted marker"
+        },
         {
           "to": "workload",
           "call": "Reset([pod-1 b1, pod-3 d1])",

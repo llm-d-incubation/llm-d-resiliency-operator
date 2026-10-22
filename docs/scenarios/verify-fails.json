@@ -42,22 +42,37 @@
       },
       "calls": [
         {
-          "to": "policy",
-          "call": "Progress(...)",
+          "to": "driver",
+          "call": "Apply(...)",
           "out": "Succeeded"
         }
       ],
-      "journal": "serving \u00b7 verifying m0 m1 m2"
+      "journal": "result Change Succeeded; policy will select verification"
     },
     {
       "title": "m1 reports serving but cannot generate",
-      "note": "One failed request is not a fault: IRO checks again every poll.",
+      "note": "The policy receives the failed Verify result and saves its first-failure time before requesting another check.",
       "phase": "serving",
       "calls": [
         {
+          "to": "policy",
+          "call": "Decide(input)",
+          "out": "Verify"
+        },
+        {
+          "to": "journal",
+          "call": "Save(record)",
+          "out": "operation, policy checkpoint and attempted marker"
+        },
+        {
           "to": "driver",
-          "call": "Verify(observation, [m0, m1, m2])",
+          "call": "Apply(Verify: observation, [m0, m1, m2])",
           "out": "m1: completion failed"
+        },
+        {
+          "to": "journal",
+          "call": "Save(record)",
+          "out": "completed result for the next Decide"
         }
       ]
     },
@@ -80,13 +95,23 @@
       },
       "calls": [
         {
+          "to": "policy",
+          "call": "Decide(input)",
+          "out": "RecreateGroup"
+        },
+        {
+          "to": "journal",
+          "call": "Save(record)",
+          "out": "operation, policy checkpoint and attempted marker"
+        },
+        {
           "to": "workload",
           "call": "ResetAll([pod-0 ... pod-3])",
           "in": "reason: verify_failed",
           "out": "the whole group is recreated"
         }
       ],
-      "note": "2m by default. In expert parallel every member takes part in every step, so no smaller action is safe."
+      "note": "The policy compares elapsed time with its saved first-failure time and chooses RecreateGroup when VerifyTimeout expires."
     },
     {
       "title": "A new group serves",
@@ -117,7 +142,7 @@
         },
         {
           "to": "policy",
-          "call": "Plan(...)",
+          "call": "Decide(...)",
           "out": "Healthy"
         }
       ]

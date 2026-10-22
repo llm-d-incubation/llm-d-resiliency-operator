@@ -12,36 +12,43 @@
       "title": "m3 dies",
       "phase": "recovering",
       "pods": {"pod-0": {"m0": "paused"}, "pod-1": {"m1": "paused"}, "pod-2": {"m2": "paused"}, "pod-3": {"m3": "dead"}},
-      "calls": [{"to": "policy", "call": "Plan(...)", "out": "Change: remove m3@idD"}]
+      "calls": [
+        {"to": "policy", "call": "Decide(...)", "out": "Change: remove m3@idD"}
+      ]
     },
     {
       "title": "IRO sends the reconfig",
       "phase": "recovering",
-      "calls": [{"to": "driver", "call": "Apply(observation, reconfig)", "in": "iro-ft-1: remove m3", "out": "m0, m1, m2 accept"}]
+      "calls": [
+        {"to": "driver", "call": "Apply(saved operation, fresh observation)", "in": "iro-ft-1: remove m3", "out": "Running; m0, m1, m2 accepted"}
+      ]
     },
     {
       "title": "m1 fails while reconfiguring",
       "note": "The engine cannot promise the survivors are consistent, so the reconfig fails for the whole group.",
       "phase": "recovering",
       "pods": {"pod-1": {"m1": "dead"}},
-      "calls": [{"to": "policy", "call": "Progress(observation, reconfig)", "out": "Failed, scope Group: m1 FT failed"}]
+      "calls": [
+        {"to": "driver", "call": "Apply(saved operation, fresh observation)", "out": "Failed, scope Group: m1 FT failed"}
+      ]
     },
     {
       "title": "IRO resets the whole group",
       "phase": "starting",
       "pods": {"pod-0": {"gone": true}, "pod-1": {"gone": true}, "pod-2": {"gone": true}, "pod-3": {"gone": true}},
-      "calls": [{"to": "workload", "call": "ResetAll([pod-0 ... pod-3])", "in": "reason: reconfig_failed", "out": "the whole group is recreated"}]
+      "calls": [
+        {"to": "policy", "call": "Decide(input)", "out": "RecreateGroup"},
+        {"to": "journal", "call": "Save(record)", "out": "operation, policy checkpoint and attempted marker"},
+        {"to": "workload", "call": "ResetAll([pod-0 ... pod-3])", "in": "reason: reconfig_failed", "out": "the whole group is recreated"}
+      ]
     },
     {
       "title": "A new group serves",
       "phase": "serving",
-      "pods": {
-        "pod-0": {"uid": "a2", "m0": "serving"},
-        "pod-1": {"uid": "b2", "m1": "serving"},
-        "pod-2": {"uid": "c2", "m2": "serving"},
-        "pod-3": {"uid": "d2", "m3": "serving"}
-      },
-      "calls": [{"to": "policy", "call": "Plan(...)", "out": "Healthy"}],
+      "pods": {"pod-0": {"uid": "a2", "m0": "serving"}, "pod-1": {"uid": "b2", "m1": "serving"}, "pod-2": {"uid": "c2", "m2": "serving"}, "pod-3": {"uid": "d2", "m3": "serving"}},
+      "calls": [
+        {"to": "policy", "call": "Decide(...)", "out": "Healthy"}
+      ],
       "journal": "serving · admitted m0@idA2 m1@idB2 m2@idC2 m3@idD2"
     }
   ]

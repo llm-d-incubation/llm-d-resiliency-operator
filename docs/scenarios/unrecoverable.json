@@ -38,7 +38,7 @@
       "calls": [
         {
           "to": "policy",
-          "call": "Plan(...)",
+          "call": "Decide(...)",
           "out": "Healthy"
         }
       ]
@@ -64,8 +64,8 @@
       "calls": [
         {
           "to": "policy",
-          "call": "Plan(...)",
-          "out": "Unrecoverable: no redundant slot for a missing expert"
+          "call": "Decide(...)",
+          "out": "RecreateGroup: no redundant slot for a missing expert"
         }
       ]
     },
@@ -87,6 +87,16 @@
         }
       },
       "calls": [
+        {
+          "to": "policy",
+          "call": "Decide(input)",
+          "out": "RecreateGroup"
+        },
+        {
+          "to": "journal",
+          "call": "Save(record)",
+          "out": "operation, policy checkpoint and attempted marker"
+        },
         {
           "to": "workload",
           "call": "ResetAll([pod-0 ... pod-3])",
@@ -124,7 +134,7 @@
         },
         {
           "to": "policy",
-          "call": "Plan(...)",
+          "call": "Decide(...)",
           "out": "Healthy"
         }
       ]

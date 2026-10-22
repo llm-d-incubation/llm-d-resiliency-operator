@@ -14,7 +14,7 @@
       "calls": [
         {"to": "workload", "call": "Discover()", "out": "4 Pods, all Ready"},
         {"to": "driver", "call": "Observe(pods)", "out": "m0 to m3 serving"},
-        {"to": "policy", "call": "Plan(observation, admitted, candidates)", "out": "Healthy"}
+        {"to": "policy", "call": "Decide(input)", "out": "Healthy"}
       ],
       "journal": "serving · admitted m0@idA m1@idB m2@idC m3@idD"
     },
@@ -25,7 +25,7 @@
       "pods": {"pod-0": {"m0": "paused"}, "pod-1": {"m1": "paused"}, "pod-2": {"m2": "paused"}, "pod-3": {"m3": "dead"}},
       "calls": [
         {"to": "driver", "call": "Observe(pods)", "out": "m3 terminal · m0, m1, m2 paused"},
-        {"to": "policy", "call": "Plan(observation, admitted, candidates)", "in": "admitted m0 to m3", "out": "Change: remove m3@idD"}
+        {"to": "policy", "call": "Decide(input)", "in": "admitted m0 to m3", "out": "Change: remove m3@idD"}
       ]
     },
     {
@@ -34,8 +34,8 @@
       "phase": "recovering",
       "calls": [
         {"to": "journal", "call": "Save(record)", "in": "reconfig iro-ft-1: remove m3@idD"},
-        {"to": "driver", "call": "Apply(observation, reconfig)", "in": "iro-ft-1 to m0, m1, m2", "out": "m0, m1, m2 accept"},
-        {"to": "journal", "call": "Save(record)", "in": "acceptances of iro-ft-1"}
+        {"to": "driver", "call": "Apply(saved operation, fresh observation)", "in": "iro-ft-1 to m0, m1, m2", "out": "Running; m0, m1, m2 accepted"},
+        {"to": "journal", "call": "Save(record)", "in": "Running report and execution checkpoint"}
       ],
       "journal": "recovering · reconfig iro-ft-1 accepted by m0 m1 m2"
     },
@@ -44,8 +44,11 @@
       "phase": "serving",
       "pods": {"pod-0": {"m0": "serving"}, "pod-1": {"m1": "serving"}, "pod-2": {"m2": "serving"}, "pod-3": {"m3": "excluded"}},
       "calls": [
-        {"to": "policy", "call": "Progress(observation, reconfig)", "out": "Succeeded"},
-        {"to": "driver", "call": "Verify(observation, [m0, m1, m2])", "out": "inference works"}
+        {"to": "driver", "call": "Apply(saved operation, fresh observation)", "out": "Succeeded"},
+        {"to": "policy", "call": "Decide(input)", "out": "Verify"},
+        {"to": "journal", "call": "Save(record)", "out": "operation, policy checkpoint and attempted marker"},
+        {"to": "driver", "call": "Apply(Verify: observation, [m0, m1, m2])", "out": "inference works"},
+        {"to": "journal", "call": "Save(record)", "out": "completed result for the next Decide"}
       ],
       "journal": "serving · admitted m0 m1 m2 · excluded m3@idD"
     },
@@ -55,6 +58,8 @@
       "phase": "serving",
       "pods": {"pod-3": {"uid": "d2", "m3": "starting"}},
       "calls": [
+        {"to": "policy", "call": "Decide(input)", "out": "ReplaceMembers"},
+        {"to": "journal", "call": "Save(record)", "out": "operation, policy checkpoint and attempted marker"},
         {"to": "workload", "call": "Reset([pod-3 d1])", "out": "pod-3 is deleted and recreated"},
         {"to": "workload", "call": "Discover()", "out": "pod-3 back with UID d2, starting"}
       ]
@@ -65,8 +70,8 @@
       "pods": {"pod-3": {"m3": "joining"}},
       "calls": [
         {"to": "driver", "call": "Observe(pods)", "out": "m3 on pod-3 (d2) joinable"},
-        {"to": "policy", "call": "Plan(observation, admitted, candidates)", "in": "candidate m3@idD2", "out": "Change: add m3@idD2"},
-        {"to": "driver", "call": "Apply(observation, reconfig)", "in": "iro-ft-2: add m3@idD2", "out": "all accept"}
+        {"to": "policy", "call": "Decide(input)", "in": "candidate m3@idD2", "out": "Change: add m3@idD2"},
+        {"to": "driver", "call": "Apply(saved operation, fresh observation)", "in": "iro-ft-2: add m3@idD2", "out": "Running; all accepted"}
       ]
     },
     {
@@ -74,8 +79,11 @@
       "phase": "serving",
       "pods": {"pod-3": {"m3": "serving"}},
       "calls": [
-        {"to": "policy", "call": "Progress(observation, reconfig)", "out": "Succeeded"},
-        {"to": "driver", "call": "Verify(observation, [m0, m1, m2, m3])", "out": "inference works"}
+        {"to": "driver", "call": "Apply(saved operation, fresh observation)", "out": "Succeeded"},
+        {"to": "policy", "call": "Decide(input)", "out": "Verify"},
+        {"to": "journal", "call": "Save(record)", "out": "operation, policy checkpoint and attempted marker"},
+        {"to": "driver", "call": "Apply(Verify: observation, [m0, m1, m2, m3])", "out": "inference works"},
+        {"to": "journal", "call": "Save(record)", "out": "completed result for the next Decide"}
       ],
       "journal": "serving · admitted m0@idA m1@idB m2@idC m3@idD2"
     }

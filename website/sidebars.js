@@ -30,6 +30,9 @@ export default {
       link: {type: 'doc', id: 'failures/index'},
       items: [
         'failures/member-dies',
+        'failures/member-dies-in-shared-pod',
+        'failures/member-rejoin-fails',
+        'failures/recovery-repeats',
         'failures/several-members-die',
         'failures/another-member-dies',
         'failures/transient-fault',

@@ -11,11 +11,13 @@
     {
       "title": "The group serves",
       "phase": "serving",
-      "calls": [{"to": "driver", "call": "Observe(pods)", "out": "m0 to m3 serving"}]
+      "calls": [
+        {"to": "driver", "call": "Observe(pods)", "out": "m0 to m3 serving"}
+      ]
     },
     {
       "title": "IRO cannot read any member",
-      "note": "The network between IRO and the Pods breaks. The group itself may still serve. IRO opens no incident, plans nothing, and pauses its deadlines. If reads come back in time, nothing happens.",
+      "note": "The network between IRO and the Pods breaks. The group itself may still serve. IRO opens no incident and plans nothing during the unseen interval. Saved deadlines retain their original start times. If reads come back in time, nothing happens.",
       "phase": "serving",
       "pods": {"pod-0": {"m0": "unknown"}, "pod-1": {"m1": "unknown"}, "pod-2": {"m2": "unknown"}, "pod-3": {"m3": "unknown"}},
       "calls": [
@@ -26,28 +28,31 @@
     },
     {
       "title": "Still unread after --ft-unseen-timeout",
-      "note": "IRO cannot tell a blind spot of its own from a hung group, so after the timeout (10m by default) it resets. Only polls where Discover works count: IRO never resets a group the workload cannot list.",
+      "note": "IRO cannot distinguish its own blind spot from a hung group. After the timeout (10m by default), the policy receives ObservationTimedOut and chooses RecreateGroup. Discover must work before policy can act. Restored reads clear the flag; an uncertain membership operation stays fenced. IRO never resets a group the workload cannot list.",
       "phase": "starting",
       "pods": {"pod-0": {"gone": true}, "pod-1": {"gone": true}, "pod-2": {"gone": true}, "pod-3": {"gone": true}},
-      "calls": [{"to": "workload", "call": "ResetAll([pod-0 ... pod-3])", "in": "reason: unseen", "out": "the whole group is recreated"}]
+      "calls": [
+        {"to": "policy", "call": "Decide(input)", "out": "RecreateGroup"},
+        {"to": "journal", "call": "Save(record)", "out": "operation, policy checkpoint and attempted marker"},
+        {"to": "workload", "call": "ResetAll([pod-0 ... pod-3])", "in": "reason: unseen", "out": "the whole group is recreated"}
+      ]
     },
     {
       "title": "A new group starts",
       "phase": "starting",
-      "pods": {
-        "pod-0": {"uid": "a2", "m0": "starting"},
-        "pod-1": {"uid": "b2", "m1": "starting"},
-        "pod-2": {"uid": "c2", "m2": "starting"},
-        "pod-3": {"uid": "d2", "m3": "starting"}
-      },
-      "calls": [{"to": "workload", "call": "Discover()", "out": "4 new UIDs, none saved: a new group"}],
+      "pods": {"pod-0": {"uid": "a2", "m0": "starting"}, "pod-1": {"uid": "b2", "m1": "starting"}, "pod-2": {"uid": "c2", "m2": "starting"}, "pod-3": {"uid": "d2", "m3": "starting"}},
+      "calls": [
+        {"to": "workload", "call": "Discover()", "out": "4 new UIDs, none saved: a new group"}
+      ],
       "journal": "starting · new group"
     },
     {
       "title": "Every member is up",
       "phase": "serving",
       "pods": {"pod-0": {"m0": "serving"}, "pod-1": {"m1": "serving"}, "pod-2": {"m2": "serving"}, "pod-3": {"m3": "serving"}},
-      "calls": [{"to": "policy", "call": "Plan(...)", "out": "Healthy"}]
+      "calls": [
+        {"to": "policy", "call": "Decide(...)", "out": "Healthy"}
+      ]
     }
   ]
 }

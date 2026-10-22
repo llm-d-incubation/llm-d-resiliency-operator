@@ -11,7 +11,9 @@
     {
       "title": "The group serves",
       "phase": "serving",
-      "calls": [{"to": "policy", "call": "Plan(...)", "out": "Healthy"}]
+      "calls": [
+        {"to": "policy", "call": "Decide(...)", "out": "Healthy"}
+      ]
     },
     {
       "title": "m1 and m3 die together",
@@ -19,7 +21,7 @@
       "pods": {"pod-0": {"m0": "paused"}, "pod-1": {"m1": "dead"}, "pod-2": {"m2": "paused"}, "pod-3": {"m3": "dead"}},
       "calls": [
         {"to": "driver", "call": "Observe(pods)", "out": "m1, m3 terminal · m0, m2 paused"},
-        {"to": "policy", "call": "Plan(...)", "out": "Change: remove m1@idB and m3@idD"}
+        {"to": "policy", "call": "Decide(...)", "out": "Change: remove m1@idB and m3@idD"}
       ]
     },
     {
@@ -28,7 +30,7 @@
       "phase": "recovering",
       "calls": [
         {"to": "journal", "call": "Save(record)", "in": "reconfig iro-ft-1: remove m1, m3"},
-        {"to": "driver", "call": "Apply(observation, reconfig)", "in": "iro-ft-1 to m0, m2", "out": "m0, m2 accept"}
+        {"to": "driver", "call": "Apply(saved operation, fresh observation)", "in": "iro-ft-1 to m0, m2", "out": "m0, m2 accept"}
       ]
     },
     {
@@ -36,24 +38,31 @@
       "phase": "serving",
       "pods": {"pod-0": {"m0": "serving"}, "pod-1": {"m1": "excluded"}, "pod-2": {"m2": "serving"}, "pod-3": {"m3": "excluded"}},
       "calls": [
-        {"to": "policy", "call": "Progress(...)", "out": "Succeeded"},
-        {"to": "driver", "call": "Verify(observation, [m0, m2])", "out": "inference works"}
+        {"to": "driver", "call": "Apply(...)", "out": "Succeeded"},
+        {"to": "policy", "call": "Decide(input)", "out": "Verify"},
+        {"to": "journal", "call": "Save(record)", "out": "operation, policy checkpoint and attempted marker"},
+        {"to": "driver", "call": "Apply(Verify: observation, [m0, m2])", "out": "inference works"},
+        {"to": "journal", "call": "Save(record)", "out": "completed result for the next Decide"}
       ]
     },
     {
       "title": "Both failed Pods are reset in one call",
       "phase": "serving",
       "pods": {"pod-1": {"uid": "b2", "m1": "starting"}, "pod-3": {"uid": "d2", "m3": "starting"}},
-      "calls": [{"to": "workload", "call": "Reset([pod-1 b1, pod-3 d1])", "out": "both recreated with new UIDs"}]
+      "calls": [
+        {"to": "policy", "call": "Decide(input)", "out": "ReplaceMembers"},
+        {"to": "journal", "call": "Save(record)", "out": "operation, policy checkpoint and attempted marker"},
+        {"to": "workload", "call": "Reset([pod-1 b1, pod-3 d1])", "out": "both recreated with new UIDs"}
+      ]
     },
     {
       "title": "Both new members join, then full again",
       "phase": "serving",
       "pods": {"pod-1": {"m1": "serving"}, "pod-3": {"m3": "serving"}},
       "calls": [
-        {"to": "policy", "call": "Plan(...)", "out": "Change: add m1@idB2 and m3@idD2"},
-        {"to": "driver", "call": "Apply(...)", "out": "all accept"},
-        {"to": "policy", "call": "Progress(...)", "out": "Succeeded"}
+        {"to": "policy", "call": "Decide(...)", "out": "Change: add m1@idB2 and m3@idD2"},
+        {"to": "driver", "call": "Apply(...)", "out": "Running; all accepted"},
+        {"to": "driver", "call": "Apply(...)", "out": "Succeeded"}
       ]
     }
   ]

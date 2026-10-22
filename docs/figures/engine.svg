@@ -1,15 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1000" height="300" viewBox="0 0 1000 300" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
 <rect width="100%" height="100%" rx="8" fill="#ffffff"/>
 <text x="32.0" y="42.0" font-size="20" fill="#202124" text-anchor="start" font-weight="700" xml:space="preserve">The engine plugin</text>
-<text x="32.0" y="66.0" font-size="13" fill="#5f6368" text-anchor="start" xml:space="preserve">the policy decides from what the driver read · only the driver does I/O</text>
+<text x="32.0" y="66.0" font-size="13" fill="#5f6368" text-anchor="start" xml:space="preserve">policy uses observation, checkpoint and result; driver executes engine actions</text>
 <rect x="40.0" y="130.0" width="180.0" height="64.0" rx="6" fill="#e8f0fe" stroke="#1a73e8" stroke-width="2"/>
 <text x="130.0" y="167.0" font-size="14" fill="#1a73e8" text-anchor="middle" font-weight="700" xml:space="preserve">Controller</text>
 <rect x="390.0" y="92.0" width="220.0" height="64.0" rx="6" fill="#e6f4ea" stroke="#1e8e3e" stroke-width="2"/>
 <text x="500.0" y="120.0" font-size="14" fill="#1e8e3e" text-anchor="middle" font-weight="700" xml:space="preserve">Driver</text>
-<text x="500.0" y="140.0" font-size="12.5" fill="#5f6368" text-anchor="middle" xml:space="preserve">Observe, Probe, Apply, Verify</text>
+<text x="500.0" y="140.0" font-size="12.5" fill="#5f6368" text-anchor="middle" xml:space="preserve">Observe, resumable Apply</text>
 <rect x="390.0" y="196.0" width="220.0" height="64.0" rx="6" fill="#e6f4ea" stroke="#1e8e3e" stroke-width="2"/>
 <text x="500.0" y="224.0" font-size="14" fill="#1e8e3e" text-anchor="middle" font-weight="700" xml:space="preserve">Policy</text>
-<text x="500.0" y="244.0" font-size="12.5" fill="#5f6368" text-anchor="middle" xml:space="preserve">Plan, Progress · pure</text>
+<text x="500.0" y="244.0" font-size="12.5" fill="#5f6368" text-anchor="middle" xml:space="preserve">Decide - pure</text>
 <rect x="760.0" y="92.0" width="200.0" height="64.0" rx="6" fill="#e6f4ea" stroke="#1e8e3e" stroke-width="2"/>
 <text x="860.0" y="120.0" font-size="14" fill="#1e8e3e" text-anchor="middle" font-weight="700" xml:space="preserve">Engine runtime</text>
 <text x="860.0" y="140.0" font-size="12.5" fill="#5f6368" text-anchor="middle" xml:space="preserve">FT API</text>
@@ -18,7 +18,7 @@
 <text x="230.0" y="114.0" font-size="12" fill="#1a73e8" text-anchor="start" xml:space="preserve">Capabilities, I/O calls</text>
 <path d="M 220.0 174.0 L 300.0 174.0 L 300.0 228.0 L 390.0 228.0" fill="none" stroke="#1a73e8" stroke-width="1.8"/>
 <polygon points="390.0,228.0 380.8,231.9 380.8,224.1" fill="#1a73e8"/>
-<text x="310.0" y="250.0" font-size="12" fill="#1a73e8" text-anchor="start" xml:space="preserve">decisions</text>
+<text x="310.0" y="250.0" font-size="12" fill="#1a73e8" text-anchor="start" xml:space="preserve">state, result</text>
 <path d="M 610.0 124.0 L 760.0 124.0" fill="none" stroke="#1e8e3e" stroke-width="1.8"/>
 <polygon points="760.0,124.0 750.8,127.9 750.8,120.1" fill="#1e8e3e"/>
 <text x="685.0" y="116.0" font-size="12" fill="#1e8e3e" text-anchor="middle" xml:space="preserve">HTTP</text>

@@ -1,6 +1,6 @@
 {
   "title": "What the policy can say",
-  "callsTitle": "Plan, and what the controller does",
+  "callsTitle": "Actions and controller execution",
   "pods": [
     {
       "name": "pod-0",
@@ -38,7 +38,7 @@
       "calls": [
         {
           "to": "policy",
-          "call": "Plan(observation, admitted, candidates)",
+          "call": "Decide(input)",
           "out": "Healthy"
         },
         {
@@ -69,7 +69,7 @@
       "calls": [
         {
           "to": "policy",
-          "call": "Plan(...)",
+          "call": "Decide(...)",
           "out": "Wait"
         },
         {
@@ -86,13 +86,13 @@
       "calls": [
         {
           "to": "policy",
-          "call": "Plan(...)",
+          "call": "Decide(...)",
           "out": "Change: Participants m0-m3, Remove none, Add none"
         },
         {
           "to": "driver",
           "call": "Apply(...)",
-          "out": "all accept"
+          "out": "Running; all accepted"
         }
       ]
     },
@@ -107,13 +107,13 @@
       "calls": [
         {
           "to": "policy",
-          "call": "Plan(...)",
+          "call": "Decide(...)",
           "out": "Change: Participants m0-m2, Remove m3@idD"
         },
         {
           "to": "driver",
           "call": "Apply(...)",
-          "out": "m0, m1, m2 accept; m3 becomes excluded"
+          "out": "Running; m0, m1, m2 accepted; exclusion awaits Succeeded"
         }
       ]
     },
@@ -139,13 +139,13 @@
       "calls": [
         {
           "to": "policy",
-          "call": "Plan(...)",
+          "call": "Decide(...)",
           "out": "Change: Participants m0-m2, Add m3@idD2"
         },
         {
           "to": "driver",
           "call": "Apply(...)",
-          "out": "all accept"
+          "out": "Running; all accepted"
         }
       ]
     },
@@ -164,14 +164,14 @@
       "calls": [
         {
           "to": "policy",
-          "call": "Plan(...)",
+          "call": "Decide(...)",
           "out": "Change: Participants m0, m1, Remove m2@idC, Add m3@idD2"
         }
       ]
     },
     {
-      "t": "Unrecoverable",
-      "title": "Unrecoverable: nothing in place can help",
+      "t": "RecreateGroup",
+      "title": "RecreateGroup: nothing in place can help",
       "note": "For example, the survivors cannot hold every expert.",
       "pods": {
         "pod-0": {
@@ -190,8 +190,8 @@
       "calls": [
         {
           "to": "policy",
-          "call": "Plan(...)",
-          "out": "Unrecoverable"
+          "call": "Decide(...)",
+          "out": "RecreateGroup"
         },
         {
           "to": "controller",

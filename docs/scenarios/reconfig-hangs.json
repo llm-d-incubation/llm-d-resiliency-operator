@@ -52,9 +52,9 @@
       "calls": [
         {
           "to": "driver",
-          "call": "Apply(observation, reconfig)",
+          "call": "Apply(saved operation, fresh observation)",
           "in": "iro-ft-1: remove m3",
-          "out": "m0, m1, m2 accept"
+          "out": "Running; m0, m1, m2 accepted"
         }
       ],
       "journal": "recovering \u00b7 reconfig iro-ft-1 since 10:00:05"
@@ -64,72 +64,45 @@
       "phase": "recovering",
       "calls": [
         {
-          "to": "policy",
-          "call": "Progress(...)",
+          "to": "driver",
+          "call": "Apply(...)",
           "out": "Running"
         }
       ]
     },
     {
-      "title": "--ft-apply-timeout passes",
-      "phase": "starting",
-      "pods": {
-        "pod-0": {
-          "gone": true
-        },
-        "pod-1": {
-          "gone": true
-        },
-        "pod-2": {
-          "gone": true
-        },
-        "pod-3": {
-          "gone": true
-        }
-      },
+      "title": "The original apply deadline passes",
+      "phase": "recovering",
       "calls": [
         {
-          "to": "workload",
-          "call": "ResetAll([pod-0 ... pod-3])",
-          "in": "reason: apply_deadline",
-          "out": "the whole group is recreated"
+          "to": "journal",
+          "call": "Save",
+          "out": "operation remains pending; deadline exceeded"
+        },
+        {
+          "to": "driver",
+          "call": "Apply(iro-ft-1, MayAdvance=false)",
+          "out": "Running; outcome not established"
         }
       ],
-      "note": "90s by default, from when the reconfig was sent."
+      "note": "The deadline stops further driver effects. It does not prove cancellation or authorize a conflicting group reset."
     },
     {
-      "title": "A new group serves",
-      "phase": "serving",
-      "pods": {
-        "pod-0": {
-          "uid": "a2",
-          "m0": "serving"
-        },
-        "pod-1": {
-          "uid": "b2",
-          "m1": "serving"
-        },
-        "pod-2": {
-          "uid": "c2",
-          "m2": "serving"
-        },
-        "pod-3": {
-          "uid": "d2",
-          "m3": "serving"
-        }
-      },
+      "title": "Continue observing the saved operation",
+      "phase": "recovering",
       "calls": [
         {
-          "to": "workload",
-          "call": "Discover()",
-          "out": "4 new UIDs, none saved: a new group"
+          "to": "driver",
+          "call": "Observe",
+          "out": "operation still unresolved"
         },
         {
-          "to": "policy",
-          "call": "Plan(...)",
-          "out": "Healthy"
+          "to": "driver",
+          "call": "Apply(iro-ft-1, MayAdvance=false)",
+          "out": "Running; preserve operation and original deadline"
         }
-      ]
+      ],
+      "note": "A new leader resumes the same read-only reporting loop. Decide waits for an established terminal outcome."
     }
   ]
 }
