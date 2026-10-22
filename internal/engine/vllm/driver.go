@@ -231,6 +231,9 @@ func (eng *Engine) Verify(ctx context.Context, observation engine.Observation, m
 		}
 		wg.Go(func() {
 			var response struct {
+				Choices []struct {
+					FinishReason string `json:"finish_reason"`
+				} `json:"choices"`
 				Usage struct {
 					CompletionTokens int `json:"completion_tokens"`
 				} `json:"usage"`
@@ -238,6 +241,9 @@ func (eng *Engine) Verify(ctx context.Context, observation engine.Observation, m
 			body, _, err := eng.call(ctx, http.MethodPost, r.Address, "/v1/completions", payload)
 			if err == nil {
 				err = json.Unmarshal(body, &response)
+			}
+			if err == nil && (len(response.Choices) != 1 || response.Choices[0].FinishReason != "length") {
+				err = errors.New("completion did not finish at the token limit")
 			}
 			if err == nil && response.Usage.CompletionTokens != 8 {
 				err = fmt.Errorf("generated %d tokens, want 8", response.Usage.CompletionTokens)

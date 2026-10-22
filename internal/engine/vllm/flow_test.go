@@ -318,3 +318,44 @@ func TestFlowFaultAfterTheReconfigResetsAtOnce(t *testing.T) {
 		t.Fatalf("group resets %d after %v", run.wl.resetAll, time.Since(started))
 	}
 }
+
+func TestFlowAbortedVerification(t *testing.T) {
+	t.Parallel()
+	for _, reset := range []bool{false, true} {
+		t.Run(fmt.Sprintf("reset=%v", reset), func(t *testing.T) {
+			t.Parallel()
+			run := newFlow(t)
+			run.fleet.ranks[0].mu.Lock()
+			run.fleet.ranks[0].finish = "abort"
+			run.fleet.ranks[0].mu.Unlock()
+			run.fault(3)
+			run.until("aborted completion rejected", func(record enginefault.Record) bool {
+				return !record.VerifyFailedSince.IsZero()
+			})
+			if reset {
+				config := enginefault.Defaults()
+				config.VerifyTimeout = 0
+				fsm, err := enginefault.New(t.Context(), run.wl, run.fleet.eng, run.store,
+					telemetry.New(logr.Discard(), time.Minute), config)
+				if err != nil {
+					t.Fatal(err)
+				}
+				run.fsm = fsm
+				record := run.until("reset after aborted verification", func(record enginefault.Record) bool {
+					return record.Phase == enginefault.Starting
+				})
+				if run.wl.resetAll != 1 || !strings.Contains(record.Reason, "verify_failed") {
+					t.Fatalf("resets %d, record %+v", run.wl.resetAll, record)
+				}
+				return
+			}
+			run.fleet.ranks[0].mu.Lock()
+			run.fleet.ranks[0].finish = "length"
+			run.fleet.ranks[0].mu.Unlock()
+			run.until("generation verified", func(record enginefault.Record) bool { return served(&record) })
+			if run.wl.resetAll != 0 || len(run.sim.applies) != 3 {
+				t.Fatalf("resets %d, applies %v", run.wl.resetAll, run.sim.applies)
+			}
+		})
+	}
+}
