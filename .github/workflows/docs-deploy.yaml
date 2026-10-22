@@ -1,0 +1,161 @@
+name: Docs deploy
+
+# Publishes what Docs (docs.yaml) built. The docs-site branch holds the whole site: main's build at the root and
+# each open PR's build under pr-preview/pr-<number>. Every change to it redeploys GitHub Pages from it.
+# PR builds come from untrusted code, so this workflow only copies their static files and never runs them.
+on:
+  workflow_run:
+    workflows: [Docs]
+    types: [completed]
+  pull_request_target:
+    types: [closed]
+    paths: [docs/**, website/**]
+
+permissions:
+  contents: read
+
+env:
+  SITE: https://llm-d-incubation.github.io/llm-d-resiliency-operator
+
+jobs:
+  store:
+    if: >-
+      github.event_name == 'pull_request_target' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       (github.event.workflow_run.event == 'pull_request' || github.event.workflow_run.head_branch == 'main'))
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CLOSED: ${{ github.event_name == 'pull_request_target' }}
+      SHA: ${{ github.event.workflow_run.head_sha }}
+    outputs:
+      changed: ${{ steps.store.outputs.changed }}
+    steps:
+      - uses: actions/download-artifact@v8
+        if: github.event_name == 'workflow_run'
+        with:
+          name: docs-site
+          path: site
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - id: target
+        name: Pick where the build goes
+        env:
+          EVENT: ${{ github.event.workflow_run.event }}
+          CLOSED_PR: ${{ github.event.pull_request.number }}
+        run: |
+          if [ "$CLOSED" = true ]; then
+            echo "pr=$CLOSED_PR" >> "$GITHUB_OUTPUT"
+          elif [ "$EVENT" = pull_request ]; then
+            pr=$(cat site/pr-number) && rm site/pr-number
+            [[ $pr =~ ^[0-9]+$ ]] || { echo "::error::bad PR number"; exit 1; }
+            # The number comes from the PR's build: accept it only if that PR is open at the built commit.
+            if [ "$(gh api "repos/$GITHUB_REPOSITORY/pulls/$pr" --jq '.state + " " + .head.sha')" != "open $SHA" ]; then
+              echo "PR $pr is closed or has newer commits, skipping"
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+            fi
+            echo "pr=$pr" >> "$GITHUB_OUTPUT"
+          fi
+
+      - id: store
+        if: steps.target.outputs.skip != 'true'
+        name: Update the docs-site branch
+        env:
+          PR: ${{ steps.target.outputs.pr }}
+        run: |
+          gh auth setup-git
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          url=https://github.com/$GITHUB_REPOSITORY
+          # Retry when another run updates the branch at the same time.
+          for attempt in 1 2 3 4 5; do
+            rm -rf pages
+            old=
+            if git ls-remote --exit-code "$url" refs/heads/docs-site > /dev/null; then
+              git clone -q --depth 1 --branch docs-site "$url" pages
+              old=$(git -C pages rev-parse HEAD)
+            elif [ -z "$PR" ]; then
+              git init -q pages
+            elif [ "$CLOSED" = true ]; then
+              exit 0
+            else
+              echo "::error::The docs-site branch does not exist yet. A docs build on main creates it."
+              exit 1
+            fi
+            if [ -z "$PR" ]; then
+              find pages -mindepth 1 -maxdepth 1 ! -name .git ! -name pr-preview -exec rm -rf {} +
+              cp -R site/. pages/
+            else
+              rm -rf "pages/pr-preview/pr-$PR"
+              if [ "$CLOSED" != true ]; then
+                mkdir -p "pages/pr-preview/pr-$PR"
+                cp -R site/. "pages/pr-preview/pr-$PR/"
+              fi
+            fi
+            git -C pages add -A
+            if [ -n "$old" ] && git -C pages diff --cached --quiet > /dev/null; then
+              echo "changed=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            # A single commit: the branch holds build output, its history is not needed.
+            commit=$(git -C pages commit-tree -m "Docs site" "$(git -C pages write-tree)")
+            if git -C pages push -q --force-with-lease="refs/heads/docs-site:$old" "$url" "$commit:refs/heads/docs-site"; then
+              echo "changed=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            sleep $((attempt * 5))
+          done
+          exit 1
+
+      - if: steps.target.outputs.pr && steps.store.outcome == 'success'
+        name: Comment the preview link on the PR
+        env:
+          PR: ${{ steps.target.outputs.pr }}
+        run: |
+          marker='<!-- docs-preview -->'
+          id=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
+            --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$marker\"))) | .id" | head -1)
+          if [ "$CLOSED" = true ]; then
+            [ -n "$id" ] || exit 0
+            body=$(printf '%s\nThe docs preview was removed because the PR is closed.' "$marker")
+          else
+            body=$(printf '%s\n**Docs preview** for %s: %s/pr-preview/pr-%s/docs/\n\nIt updates on every push to this PR and is removed when the PR closes.' \
+              "$marker" "${SHA::7}" "$SITE" "$PR")
+          fi
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -f body="$body" > /dev/null
+          else
+            gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -f body="$body" > /dev/null
+          fi
+
+  deploy:
+    needs: store
+    if: needs.store.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    # A newer pending deploy replaces an older one; it reads the branch when it starts, so it includes every update.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: docs-site
+          path: pages
+          persist-credentials: false
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: pages
+      - id: deploy
+        uses: actions/deploy-pages@v5

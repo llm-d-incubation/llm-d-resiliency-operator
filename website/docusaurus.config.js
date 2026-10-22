@@ -8,7 +8,8 @@ export default {
   title: 'llm-d Resiliency Operator',
   favicon: 'img/favicon.png',
   url: 'https://llm-d-incubation.github.io',
-  baseUrl: '/llm-d-resiliency-operator/',
+  // PR previews are built under a subpath of the same site.
+  baseUrl: process.env.DOCS_BASE_URL || '/llm-d-resiliency-operator/',
   onBrokenLinks: 'throw',
   markdown: {mermaid: true, format: 'detect'},
   themes: ['@docusaurus/theme-mermaid'],
