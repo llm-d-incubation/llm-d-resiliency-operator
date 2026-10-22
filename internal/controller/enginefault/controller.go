@@ -73,11 +73,12 @@ type Record struct {
 	Acceptances   []engine.Acceptance `json:"acceptances,omitempty"`
 	Verifying     []engine.MemberID   `json:"verifying,omitempty"`
 
-	LastNoChangeReconfig time.Time `json:"last_no_change_reconfig,omitzero"`
-	VerifyFailedSince    time.Time `json:"verify_failed_since,omitzero"`
-	UnseenSince          time.Time `json:"unseen_since,omitzero"`
-	UnseenByDiscover     bool      `json:"unseen_by_discover,omitempty"`
-	RecreateStopped      bool      `json:"recreate_stopped,omitempty"`
+	LastNoChangeReconfig time.Time     `json:"last_no_change_reconfig,omitzero"`
+	VerifyFailedSince    time.Time     `json:"verify_failed_since,omitzero"`
+	UnseenSince          time.Time     `json:"unseen_since,omitzero"`
+	UnseenByDiscover     bool          `json:"unseen_by_discover,omitempty"`
+	UnseenElapsed        time.Duration `json:"unseen_elapsed,omitempty"`
+	RecreateStopped      bool          `json:"recreate_stopped,omitempty"`
 
 	Incident *Incident `json:"incident,omitempty"`
 
