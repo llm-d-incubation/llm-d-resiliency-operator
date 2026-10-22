@@ -80,10 +80,10 @@ While `pod-3` is reset in [a member dies](../../failures/member-dies.md):
 Recreating: false
 RecreateStopped: false
 Pods:
-- {Name: pod-0, UID: a1, Index: 0, Identity: idA,  Node: gpu-node-1, State: Ready}
-- {Name: pod-1, UID: b1, Index: 1, Identity: idB,  Node: gpu-node-2, State: Ready}
-- {Name: pod-2, UID: c1, Index: 2, Identity: idC,  Node: gpu-node-3, State: Ready}
-- {Name: pod-3, UID: d2, Index: 3, Identity: idD2, Node: gpu-node-9, State: Starting}
+- {Name: pod-0, UID: a1, Index: 0, Identity: identity-a1,  Node: gpu-node-1, State: Ready}
+- {Name: pod-1, UID: b1, Index: 1, Identity: identity-b1,  Node: gpu-node-2, State: Ready}
+- {Name: pod-2, UID: c1, Index: 2, Identity: identity-c1,  Node: gpu-node-3, State: Ready}
+- {Name: pod-3, UID: d2, Index: 3, Identity: identity-d2, Node: gpu-node-9, State: Starting}
 ```
 
 `pod-3` has a new UID: it is a new Pod in the same place. `Discover` does not say that the old one was reset on

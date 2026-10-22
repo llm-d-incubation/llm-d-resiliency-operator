@@ -74,16 +74,16 @@ This example assumes an engine that can grow and the default `reset-pod` capacit
 | Poll | Discover | Observe | Policy says | Controller does | Phase, reconfig |
 |---|---|---|---|---|---|
 | 1 | 4 Pods `Ready` | all `Serving` | `Plan`: Healthy | nothing | serving |
-| 2 | same | `m3` Terminal, `m0`-`m2` paused | `Plan`: Change, remove `m3@idD` | enters `recovering`, saves, calls `Probe` once | recovering |
+| 2 | same | `m3` Terminal, `m0`-`m2` paused | `Plan`: Change, remove `m3@identity-d1` | enters `recovering`, saves, calls `Probe` once | recovering |
 | 3 | same | same | same | waits: under 2 polls in `recovering` | recovering |
 | 4 | same | same | same | checks the plan, saves reconfig `iro-ft-7c1e`, `Apply`, saves acceptances | recovering, reconfig in flight |
 | 5 | same | survivors rebuilding | `Progress`: Running | waits, under the apply deadline | recovering, reconfig in flight |
-| 6 | same | `m0`-`m2` healthy | `Progress`: Succeeded | marks `m3@idD` excluded, clears the reconfig, saves, `Verify(m0, m1, m2)` | serving |
-| 7 | same | same | `Plan`: Healthy | `pod-3` holds only excluded members: marks it `Removing`, saves, `Reset([pod-3 d1])` | serving |
-| 8 | `pod-3` (d1) Terminating | `m0`-`m2` Serving | `Plan`: Healthy | waits | serving |
-| 9 | `pod-3` (d2) Starting | same | `Plan`: Healthy | saves the new Pod, forgets d1 and `m3@idD`. No deadline. | serving |
-| ... | `pod-3` (d2) Ready | `m3` on d2 Joinable | `Plan`: Change, add `m3@idD2` | checks, saves reconfig, `Apply` | serving, reconfig in flight |
-| ... | same | `m3@idD2` healthy | `Progress`: Succeeded | marks `m3@idD2` admitted, saves, verifies all reconfig participants and the added member | serving |
+| 6 | same | `m0`-`m2` healthy | `Progress`: Succeeded | marks `m3@identity-d1` excluded, clears the reconfig, saves, `Verify(m0, m1, m2)` | serving |
+| 7 | same | same | `Plan`: Healthy | `pod-3` holds only excluded members: marks it `Removing`, saves, `Reset([pod-3 (UID d1)])` | serving |
+| 8 | `pod-3` (UID d1) Terminating | `m0`-`m2` Serving | `Plan`: Healthy | waits | serving |
+| 9 | `pod-3` (UID d2) Starting | same | `Plan`: Healthy | saves the new Pod, forgets UID d1 and `m3@identity-d1`. No deadline. | serving |
+| ... | `pod-3` (UID d2) Ready | `m3` on UID d2 Joinable | `Plan`: Change, add `m3@identity-d2` | checks, saves reconfig, `Apply` | serving, reconfig in flight |
+| ... | same | `m3@identity-d2` healthy | `Progress`: Succeeded | marks `m3@identity-d2` admitted, saves, verifies all reconfig participants and the added member | serving |
 
 See the [member-death example](../failures/member-dies.md#poll-by-poll) for an engine-specific poll sequence.
 
@@ -132,7 +132,7 @@ every poll and does not match or check members. On the first `Healthy` plan it a
 ### Pods and members
 
 `Discover` reports Pods. `Observe` reports members, each with the Pod it runs on. The controller joins the two
-by `Member.ID()` (`m3@idD`) and keeps each member as:
+by `Member.ID()` (`m3@identity-d1`) and keeps each member as:
 
 | State | Meaning |
 |---|---|
@@ -323,7 +323,7 @@ the controller skipped, in `WouldDo`, so the next poll does not start over.
 On every poll the controller compares what it would do now with what the state already says, and records (logs)
 only when that changes.
 
-```
+```text
 poll 1: dp3 dead  -> state empty           -> record "would remove dp3"
 poll 2: dp3 dead  -> state = remove dp3    -> same, stay quiet
 poll 3: dp3 dead  -> state = remove dp3    -> same, stay quiet
@@ -447,8 +447,8 @@ The record after poll 5 of [every poll](#every-poll), as the journal stores it a
 ```yaml
 Phase: recovering
 Reason: "m3 is dead; survivors paused"
-Reconfig: {ID: iro-ft-7c1e, Participants: [m0@idA, m1@idB, m2@idC], Remove: [m3@idD]}
-Members: {m0@idA: admitted, m1@idB: admitted, m2@idC: admitted, m3@idD: admitted}
+Reconfig: {ID: iro-ft-7c1e, Participants: [m0@identity-a1, m1@identity-b1, m2@identity-c1], Remove: [m3@identity-d1]}
+Members: {m0@identity-a1: admitted, m1@identity-b1: admitted, m2@identity-c1: admitted, m3@identity-d1: admitted}
 RecreateStopped: false
 ```
 

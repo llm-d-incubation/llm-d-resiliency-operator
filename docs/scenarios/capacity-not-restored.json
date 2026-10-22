@@ -14,7 +14,7 @@
           "title": "dp3 was removed",
           "phase": "serving",
           "calls": [
-            {"to": "workload", "call": "Discover()", "out": "pod-0@a1, pod-1@b1, pod-2@c1, pod-3@d1"},
+            {"to": "workload", "call": "Discover()", "out": "pod-0 (UID a1), pod-1 (UID b1), pod-2 (UID c1), pod-3 (UID d1)"},
             {
               "to": "driver",
               "call": "Observe(pods)",
@@ -30,10 +30,10 @@
         },
         {
           "title": "The default keeps the Pod",
-          "note": "reset-pod is the default. vLLM cannot add a rank to a running group, so IRO resets nothing: dp3@idD is rejected and the group serves below full until the next group.",
+          "note": "reset-pod is the default. vLLM cannot add a rank to a running group, so IRO resets nothing: dp3@identity-d1 is rejected and the group serves below full until the next group.",
           "phase": "serving",
           "calls": [
-            {"to": "workload", "call": "Discover()", "out": "pod-0@a1, pod-1@b1, pod-2@c1, pod-3@d1"},
+            {"to": "workload", "call": "Discover()", "out": "pod-0 (UID a1), pod-1 (UID b1), pod-2 (UID c1), pod-3 (UID d1)"},
             {
               "to": "driver",
               "call": "Observe(pods)",
@@ -48,7 +48,7 @@
             {"to": "driver", "call": "Capabilities()", "out": "Grow: no"},
             {"to": "journal", "call": "Save(record)", "in": "membership updated: excluded members on kept Pods become rejected"}
           ],
-          "journal": "serving; admitted dp0@idA dp1@idB dp2@idC; rejected dp3@idD",
+          "journal": "serving; admitted dp0@identity-a1 dp1@identity-b1 dp2@identity-c1; rejected dp3@identity-d1",
           "decision": "With reset-pod and Grow=false, IRO keeps Pods containing only excluded members and records those members as rejected.",
           "pods": {"pod-3": {"dp3": {"state": "dead", "membership": "rejected", "status": "healthy", "health": 503}}}
         },
@@ -71,7 +71,7 @@
             },
             {"to": "policy", "call": "Plan(observation, admitted, candidates)", "out": "Healthy"},
             {"to": "journal", "call": "Save(record)", "in": "phase starting; saved Pods marked Removing; membership cleared"},
-            {"to": "workload", "call": "ResetAll(pods)", "in": "pod-0@a1, pod-1@b1, pod-2@c1, pod-3@d1; reason: capacity", "out": "reset requested for the saved UIDs; the workload recreates the group asynchronously"}
+            {"to": "workload", "call": "ResetAll(pods)", "in": "pod-0 (UID a1), pod-1 (UID b1), pod-2 (UID c1), pod-3 (UID d1); reason: capacity", "out": "reset requested for the saved UIDs; the workload recreates the group asynchronously"}
           ],
           "journal": "starting; membership cleared; saved Pods marked Removing",
           "decision": "IRO saves the reset intent, then asks the workload to recreate the saved Pod UIDs."

@@ -14,7 +14,7 @@
           "title": "The group serves",
           "phase": "serving",
           "calls": [
-            {"to": "workload", "call": "Discover()", "out": "pod-0@a1, pod-1@b1, pod-2@c1, pod-3@d1"},
+            {"to": "workload", "call": "Discover()", "out": "pod-0 (UID a1), pod-1 (UID b1), pod-2 (UID c1), pod-3 (UID d1)"},
             {
               "to": "driver",
               "call": "Observe(pods)",
@@ -33,7 +33,7 @@
           "phase": "recovering",
           "pods": {"pod-2": {"dp2": {"state": "unknown", "membership": "admitted", "status": "unread"}}},
           "calls": [
-            {"to": "workload", "call": "Discover()", "out": "pod-0@a1, pod-1@b1, pod-2@c1, pod-3@d1"},
+            {"to": "workload", "call": "Discover()", "out": "pod-0 (UID a1), pod-1 (UID b1), pod-2 (UID c1), pod-3 (UID d1)"},
             {
               "to": "driver",
               "call": "Observe(pods)",
@@ -61,7 +61,7 @@
           "note": "dp2 stays Unknown. The policy waits; the controller cannot remove it without terminal evidence.",
           "phase": "recovering",
           "calls": [
-            {"to": "workload", "call": "Discover()", "out": "pod-0@a1, pod-1@b1, pod-2@c1, pod-3@d1"},
+            {"to": "workload", "call": "Discover()", "out": "pod-0 (UID a1), pod-1 (UID b1), pod-2 (UID c1), pod-3 (UID d1)"},
             {
               "to": "driver",
               "call": "Observe(pods)",
@@ -93,7 +93,7 @@
             },
             {"to": "policy", "call": "Plan(observation, admitted, candidates)", "out": "Wait"},
             {"to": "journal", "call": "Save(record)", "in": "phase starting; saved Pods marked Removing; membership cleared"},
-            {"to": "workload", "call": "ResetAll(pods)", "in": "pod-0@a1, pod-1@b1, pod-2@c1, pod-3@d1; reason: diagnosis_deadline", "out": "reset requested for the saved UIDs; the workload recreates the group asynchronously"}
+            {"to": "workload", "call": "ResetAll(pods)", "in": "pod-0 (UID a1), pod-1 (UID b1), pod-2 (UID c1), pod-3 (UID d1); reason: diagnosis_deadline", "out": "reset requested for the saved UIDs; the workload recreates the group asynchronously"}
           ],
           "journal": "starting; membership cleared; saved Pods marked Removing",
           "decision": "IRO saves the reset intent, then asks the workload to recreate the saved Pod UIDs."
