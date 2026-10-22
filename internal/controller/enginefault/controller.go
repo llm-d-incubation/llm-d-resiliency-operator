@@ -68,6 +68,8 @@ type Record struct {
 	Pods    map[string]PodRecord            `json:"pods"`
 	Members map[engine.MemberID]MemberState `json:"members"`
 
+	Replacements map[engine.MemberID]engine.MemberID `json:"replacements,omitempty"`
+
 	Reconfig      *engine.Reconfig    `json:"reconfig,omitempty"`
 	ReconfigSince time.Time           `json:"reconfig_since,omitzero"`
 	Acceptances   []engine.Acceptance `json:"acceptances,omitempty"`

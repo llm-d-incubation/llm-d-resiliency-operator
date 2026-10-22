@@ -1,0 +1,113 @@
+{
+  "title": "A member dies inside a shared Pod",
+  "page": "failures/member-dies-in-shared-pod",
+  "pods": [
+    {
+      "name": "pod-0",
+      "uid": "a1",
+      "members": {
+        "m0": "serving",
+        "m1": "serving",
+        "m2": "serving",
+        "m3": "serving"
+      }
+    }
+  ],
+  "steps": [
+    {
+      "title": "One member dies",
+      "phase": "recovering",
+      "pods": {
+        "pod-0": {
+          "m1": "dead"
+        }
+      },
+      "calls": [
+        {
+          "to": "driver",
+          "call": "Observe",
+          "out": "m1@g1@idA Terminal; container stays running"
+        }
+      ]
+    },
+    {
+      "title": "Recover and verify survivors",
+      "phase": "serving",
+      "pods": {
+        "pod-0": {
+          "m1": "excluded"
+        }
+      },
+      "calls": [
+        {
+          "to": "driver",
+          "call": "Apply(remove m1@g1@idA)"
+        },
+        {
+          "to": "driver",
+          "call": "Verify(m0, m2, m3)",
+          "out": "success"
+        }
+      ]
+    },
+    {
+      "title": "Observe a reserved replacement",
+      "phase": "serving",
+      "pods": {
+        "pod-0": {
+          "m1-new": "starting"
+        }
+      },
+      "calls": [
+        {
+          "to": "driver",
+          "call": "Observe",
+          "out": "m1@g2@idA Joinable, Replaces m1@g1@idA"
+        }
+      ]
+    },
+    {
+      "title": "Save one attempt before launch",
+      "phase": "serving",
+      "pods": {
+        "pod-0": {
+          "m1-new": "joining"
+        }
+      },
+      "calls": [
+        {
+          "to": "journal",
+          "call": "Save",
+          "out": "replacement m1@g1@idA -> m1@g2@idA; reconfig add-1"
+        },
+        {
+          "to": "driver",
+          "call": "Apply(add-1, Add m1@g2@idA)",
+          "out": "prepare, launch, admit through the engine protocol"
+        }
+      ]
+    },
+    {
+      "title": "Replacement serves",
+      "phase": "serving",
+      "pods": {
+        "pod-0": {
+          "m1-new": "serving"
+        }
+      },
+      "calls": [
+        {
+          "to": "policy",
+          "call": "Progress(add-1)",
+          "out": "Succeeded"
+        },
+        {
+          "to": "driver",
+          "call": "Verify(m0, m1@g2@idA, m2, m3)",
+          "out": "success"
+        }
+      ],
+      "note": "Pod UID a1 and the surviving processes stay unchanged."
+    }
+  ]
+}

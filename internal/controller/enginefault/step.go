@@ -308,6 +308,9 @@ func (fsm *controller) start(ctx context.Context, next *Record, group *workload.
 	var reported, live []engine.MemberID
 	for index := range obs.Members {
 		member := &obs.Members[index]
+		if member.Replaces != "" && !member.Serving {
+			continue
+		}
 		reported = append(reported, member.ID())
 		if !member.Terminal {
 			live = append(live, member.ID())
@@ -375,7 +378,7 @@ func (fsm *controller) connect(ctx context.Context, next *Record, group *workloa
 			member.Terminal, member.Serving, member.Unknown = true, false, false
 		case tracked && state == Candidate && member.Terminal:
 			next.Members[id] = Rejected
-		case !tracked && joinable(next, group, member):
+		case !tracked && joinable(next, group, member) && replacementAllowed(next, member):
 			next.Members[id] = Candidate
 		}
 		current.members[id] = member
@@ -421,6 +424,17 @@ func joinable(next *Record, group *workload.Group, member *engine.Member) bool {
 		pod.State == workload.PodReady && pod.Identity == member.PodIdentity
 }
 
+func replacementAllowed(next *Record, member *engine.Member) bool {
+	if member.Replaces == "" {
+		return true
+	}
+	uid, _, found := podOf(next, member.Replaces)
+	attempted, tried := next.Replacements[member.Replaces]
+	return found && uid == member.Pod.UID && member.Incarnation != "" &&
+		nameOf(member.Replaces) == member.Name && member.ID() != member.Replaces &&
+		next.Members[member.Replaces] == Excluded && (!tried || attempted == member.ID())
+}
+
 func isLost(next *Record, group *workload.Group, id engine.MemberID) bool {
 	uid, saved, ok := podOf(next, id)
 	if !ok {
@@ -434,7 +448,7 @@ func lostMember(next *Record, id engine.MemberID) engine.Member {
 	name, identity := nameOf(id), identityOf(id)
 	uid, saved, _ := podOf(next, id)
 	return engine.Member{
-		Pod: workload.PodRef{Name: saved.Name, UID: uid}, PodIdentity: identity, Name: name,
+		Pod: workload.PodRef{Name: saved.Name, UID: uid}, PodIdentity: identity, Name: name, Incarnation: incarnationOf(id),
 		Terminal: true, Detail: "pod lost",
 	}
 }
@@ -442,7 +456,7 @@ func lostMember(next *Record, id engine.MemberID) engine.Member {
 func unknownMember(next *Record, id engine.MemberID) engine.Member {
 	uid, saved, _ := podOf(next, id)
 	return engine.Member{
-		Pod: workload.PodRef{Name: saved.Name, UID: uid}, PodIdentity: identityOf(id), Name: nameOf(id),
+		Pod: workload.PodRef{Name: saved.Name, UID: uid}, PodIdentity: identityOf(id), Name: nameOf(id), Incarnation: incarnationOf(id),
 		Unknown: true, Detail: "not reported",
 	}
 }
@@ -553,7 +567,14 @@ func identityOf(id engine.MemberID) string {
 }
 
 func nameOf(id engine.MemberID) string {
-	return strings.TrimSuffix(string(id), "@"+identityOf(id))
+	name, _, _ := strings.Cut(string(id), "@")
+	return name
+}
+
+func incarnationOf(id engine.MemberID) string {
+	head := strings.TrimSuffix(string(id), "@"+identityOf(id))
+	_, incarnation, _ := strings.Cut(head, "@")
+	return incarnation
 }
 
 func joined(ids []engine.MemberID) string {

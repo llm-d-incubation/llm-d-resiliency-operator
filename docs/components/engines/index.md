@@ -45,17 +45,21 @@ runs on.
 
 | Field | Means | The driver must |
 |---|---|---|
-| `Name` | the engine's name for it, unique within its Pod, such as `m3` | |
+| `Name` | the logical member name within its Pod, such as `m3`; excludes `@` | |
+| `Incarnation` | a process generation within the Pod; excludes `@` | reserve it before launch and keep it stable across observations |
+| `Replaces` | the excluded incarnation replaced by this candidate, or empty | keep the association stable for the candidate |
 | `Serving` | the router may send it traffic: the engine's own health | report what the router uses, and never `Serving` for a candidate (checks [C1 and C5](../controller.md#safety-checks)) |
 | `Terminal` | it will never serve again | never report it `Serving` again, only `Terminal` or `Unknown` (check C4) |
 | `Unknown` | the driver could not read it now. `Serving`, `Terminal` and `Joinable` are then false. | use it whenever it cannot read a member, never guess `Terminal`: only a process known to be gone may be removed (check C1) |
-| `Joinable` | for a candidate only: it can be admitted now | report it false while the Pod is not `Ready`, so a loading Pod is not a candidate yet |
+| `Joinable` | for a candidate only: the driver can start admission now, including a coordinated launch | report it false while the Pod is not `Ready`; keep launch descriptors fenced to the reported incarnation |
 
-A Pod gives all of its members, or none when the driver cannot list them, so at the end of `starting` the
-controller admits exactly the members it saw.
+A Pod gives all of its members, or none when the driver cannot list them. At the end of `starting`, the
+controller adopts the reported group and skips unlaunched replacement descriptors.
 
-A member's ID is `Name@PodIdentity`, such as `m3@idD`. The Pod's identity changes when the Pod is replaced or its
-engine restarts, so an ID names exactly one process in one Pod's life, and a replaced member gets a new ID.
+A member's ID is `Name@Incarnation@PodIdentity` when `Incarnation` is set, such as `m3@g2@idD`.
+With an empty incarnation it is `Name@PodIdentity`. Engines that replace individual processes within a running
+container supply a new incarnation for every replacement. Pod replacement or engine-container restart changes
+the Pod identity. An excluded incarnation remains terminal even when its logical member has a replacement.
 
 `Serving` is not "healthy". `Serving` is what the router sees. "Healthy" is the policy's `Healthy` plan, which
 may also use what the router does not see, such as a process that already exited.
@@ -189,7 +193,10 @@ Apply(ctx, obs, Reconfig{
 // pod-3 deleted: obs holds m3@idD as the controller added it, Apply sends to m0-m2 and all accept
 ```
 
-An error means the reconfig did not start everywhere, and the controller resets the group.
+An ordinary error means the reconfig may have changed the group, and the controller resets it. A pure add
+may return `*ApplyError{Scope: Joiners, Err: err}` only after proving that admitted members are unchanged and
+candidates are stopped or fenced out of serving. The controller rejects those candidates and records the
+failure. A timeout or lost response alone cannot establish that scope.
 
 | Rule | Why |
 |---|---|
@@ -221,7 +228,7 @@ An error means the reconfig did not start everywhere, and the controller resets 
 |---|---|
 | Stay `Running` until the engine reports a result for this reconfig, or proves no member got it | the apply deadline covers a reconfig that never finishes |
 | `NotStarted` only when every participant and joiner is observed, could start the reconfig now and has not got it, and the engine would still show a reconfig a member got earlier | otherwise a reconfig that finished before a new fault looks unsent, and sending it again would run it twice |
-| `Failed` with scope `Joiners` only when admitted members are untouched | otherwise the group may be broken and must be reset |
+| `Failed` with scope `Joiners` only for a pure add, after cleanup or fencing, when admitted members are untouched | otherwise the group may be broken and must be reset |
 
 ## Checking the result
 
@@ -249,6 +256,24 @@ An engine that cannot grow returns `{Grow: false}`. The controller then never re
 engine could not take its members back. With the default `--ft-capacity-restore`, the group keeps serving with
 fewer members; with `reset-all`, IRO resets the whole group. Shrinking needs no capability: a policy that cannot
 shrink never plans `Remove`.
+
+## Replacing a process in a shared Pod
+
+`Observe` may report a replacement descriptor before the new process starts. Its `Name` identifies the logical
+member, `Incarnation` reserves the new process generation, and `Replaces` names the excluded member. The
+launcher must reserve the generation durably so every IRO leader observes the same candidate. Reading the
+descriptor performs no launch. The old incarnation and the candidate can both appear in one observation.
+
+The policy proposes an ordinary `Change` with `Add` after survivor verification. `Apply` owns the native join
+sequence: prepare survivors, clean up the old process tree, launch the reserved incarnation, and commit
+membership in the order the engine requires. It may coordinate with a local launcher. Calls are bounded;
+`Observe` reads operation state and `Progress` interprets it. A launcher keyed by operation ID must resume the
+same launch on a resend. It must fence cleanup by Pod UID and process incarnation.
+
+`Succeeded` means every added member is observed under its reserved identity and the topology has committed.
+The controller then verifies participants and joiners. A driver advertises `Grow` only for admission paths it
+can execute with its configured launcher. Native topology expansion alone does not establish failed-member
+replacement support. See [replacement admission](../controller.md#replacement-admission) for the attempt limit.
 
 ## API reference
 
@@ -287,6 +312,8 @@ type Member struct {
     Pod         PodRef
     PodIdentity string
     Name        string
+    Incarnation string
+    Replaces    MemberID
     Serving     bool
     Terminal    bool
     Unknown     bool
@@ -294,9 +321,15 @@ type Member struct {
     Detail      string // for status and logs only
 }
 
-type MemberID string // Name@PodIdentity
+type MemberID string // Name@Incarnation@PodIdentity, or Name@PodIdentity
 
-func (member *Member) ID() MemberID { return MemberID(member.Name + "@" + member.PodIdentity) }
+func (member *Member) ID() MemberID {
+    name := member.Name
+    if member.Incarnation != "" {
+        name += "@" + member.Incarnation
+    }
+    return MemberID(name + "@" + member.PodIdentity)
+}
 
 // Observation is what the driver saw in one Observe call, plus the lost members the controller adds.
 type Observation struct {
@@ -336,4 +369,9 @@ type Progress struct {
 
 type ProgressState string
 type FailureScope string
+
+type ApplyError struct {
+    Scope FailureScope
+    Err   error
+}
 ```
