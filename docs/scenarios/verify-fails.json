@@ -12,7 +12,7 @@
       "steps": [
         {
           "title": "A reconfig removed dp3 and succeeded",
-          "phase": "serving",
+          "phase": "recovering",
           "pods": {"pod-3": {"dp3": {"state": "dead", "membership": "excluded", "status": "healthy", "health": 503}}},
           "calls": [
             {"to": "workload", "call": "Discover()", "out": "pod-0@a1, pod-1@b1, pod-2@c1, pod-3@d1"},
@@ -27,7 +27,7 @@
               ]
             },
             {"to": "policy", "call": "Progress(observation, reconfig)", "out": "Succeeded"},
-            {"to": "journal", "call": "Save(record)", "in": "reconfig completed; removed members excluded; phase serving; participants pending verification"},
+            {"to": "journal", "call": "Save(record)", "in": "reconfig completed; removed members excluded; phase recovering; participants pending verification"},
             {
               "to": "driver",
               "call": "Verify(observation, [dp0, dp1, dp2])",
@@ -38,12 +38,12 @@
             },
             {"to": "journal", "call": "Save(record)", "in": "verification failed; record the first failure time and retry on later polls"}
           ],
-          "journal": "serving; verifying dp0 dp1 dp2"
+          "journal": "recovering; verifying dp0 dp1 dp2"
         },
         {
           "title": "The next verification still fails",
-          "note": "The controller phase is serving while verification retries. Every rank still reports healthy; the completion check on dp1 returns too few tokens.",
-          "phase": "serving",
+          "note": "The controller stays recovering while verification retries. Every rank still reports healthy; the completion check on dp1 returns too few tokens.",
+          "phase": "recovering",
           "calls": [
             {"to": "workload", "call": "Discover()", "out": "pod-0@a1, pod-1@b1, pod-2@c1, pod-3@d1"},
             {

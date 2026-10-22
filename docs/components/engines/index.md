@@ -29,7 +29,7 @@ is going. No I/O, no clock, no globals: the same input gives the same answer on 
 | Controller → driver | `Observe` | every poll | each member, its Pod and its state |
 | | `Probe` | once, when a fault starts | whether the engine still answers |
 | | `Apply` | to send a reconfig | which members accepted it |
-| | `Verify` | after a reconfig succeeds | whether those members can generate |
+| | `Verify` | before recovery is declared complete | whether those members can generate |
 | Controller → policy | `Plan` | every poll, with no reconfig in flight | what should happen now |
 | | `Progress` | every poll, with a reconfig in flight | how the reconfig is going |
 | Controller | `Capabilities` | once | what the engine can do at all |
@@ -75,7 +75,7 @@ What the controller asks the engine during one recovery, in order:
 2. On a fault, `Probe` once, so the engine notices a dead peer it has not hit yet.
 3. Ask the policy for a `Plan`. On a `Change`, the controller checks it and calls `Apply`.
 4. Ask the policy for `Progress` every poll until the reconfig succeeds or fails.
-5. On success, `Verify` the members that took part.
+5. On success, `Verify` the members that took part. A fault that clears without a reconfig checks every admitted member.
 
 ## Reading members
 
@@ -225,8 +225,9 @@ An error means the reconfig did not start everywhere, and the controller resets 
 
 ## Checking the result
 
-`Verify` sends one real, bounded inference request through each named member. The controller calls it only
-after a reconfig succeeds, for the members that took part or joined.
+`Verify` sends one real, bounded inference request through each named member. After a reconfig succeeds, the
+controller checks its participants and joiners. A fault that clears without a reconfig checks every admitted
+member.
 
 | | |
 |---|---|
