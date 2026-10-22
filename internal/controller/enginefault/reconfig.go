@@ -5,6 +5,8 @@ package enginefault
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -12,123 +14,164 @@ import (
 	"github.com/llm-d/llm-d-resiliency-operator/internal/engine"
 )
 
-func (fsm *controller) watch(ctx context.Context, next *Record, current *view, now time.Time) error {
-	reconfig := *next.Reconfig
-	progress := fsm.eng.Progress(current.obs, reconfig)
-	switch progress.State {
-	case engine.Succeeded:
-		for _, id := range reconfig.Remove {
-			next.Members[id] = Excluded
-		}
-		for _, id := range reconfig.Add {
-			next.Members[id] = Admitted
-		}
-		fsm.finishReconfig(next, &progress, now)
-		next.Verifying = append(slices.Clone(reconfig.Participants), reconfig.Add...)
-		next.VerifyFailedSince = time.Time{}
-		enter(next, Serving, "reconfig "+reconfig.ID+" succeeded", now)
-		if err := fsm.save(ctx, next); err != nil {
-			return err
-		}
-		return fsm.verify(ctx, next, current, now)
-	case engine.Failed:
-		fsm.finishReconfig(next, &progress, now)
-		if progress.Scope != engine.Joiners {
-			return fsm.resetAll(ctx, next, ResetReconfigFailed, progress.Reason, now)
-		}
-		for _, id := range reconfig.Add {
-			next.Members[id] = Rejected
-		}
-		if next.Phase == Recovering {
-			next.Since = now
-		}
-		return nil
-	case engine.NotStarted:
-		if len(next.Acceptances) == 0 {
-			return fsm.resend(ctx, next, current, &progress, now)
-		}
+func (fsm *controller) execute(ctx context.Context, next *Record, current *view, now time.Time) error {
+	if next.Workload != nil {
+		return fsm.watchPods(ctx, next, current.group, now)
 	}
-	if now.Sub(next.ReconfigSince) > fsm.config.ApplyTimeout {
-		fsm.finishReconfig(next, &progress, now)
-		return fsm.resetAll(ctx, next, ResetApplyDeadline, "reconfig "+reconfig.ID+" did not finish", now)
-	}
-	return nil
-}
-
-func (fsm *controller) send(ctx context.Context, next *Record, current *view, plan *engine.Plan, now time.Time) error {
-	if reason := checkPlan(next, current, plan); reason != "" {
-		return fsm.resetAll(ctx, next, ResetUnrecoverable, reason, now)
-	}
-	for _, id := range plan.Participants {
-		if member := current.members[id]; member != nil && member.Unknown {
-			next.Reason = "waiting to read " + string(id) + ": " + plan.Reason
-			return nil
-		}
-	}
-	noChange := len(plan.Remove) == 0 && len(plan.Add) == 0
-	if noChange && !next.LastNoChangeReconfig.IsZero() && now.Sub(next.LastNoChangeReconfig) < fsm.config.FlapWindow {
-		return fsm.resetAll(ctx, next, ResetFlap, "C6: "+plan.Reason, now)
-	}
-	if fsm.would(fmt.Sprintf("reconfig: remove %v, add %v", plan.Remove, plan.Add)) {
+	if fsm.config.DryRun {
+		fsm.wouldDo = describeAction(&next.Operation.Action, nil)
 		return nil
 	}
-	reconfig := engine.Reconfig{
-		ID: newID("iro-ft-", 16), Participants: slices.Clone(plan.Participants),
-		Remove: slices.Clone(plan.Remove), Add: slices.Clone(plan.Add),
+	operation := *next.Operation
+	mayAdvance := now.Sub(next.OperationSince) < fsm.config.ApplyTimeout && next.Unsafe == "" && !current.observationTimedOut
+	if mayAdvance {
+		next.OperationBlocked = ""
 	}
-	next.Reconfig, next.ReconfigSince, next.Acceptances, next.Reason = &reconfig, now, nil, plan.Reason
-	if noChange {
-		next.LastNoChangeReconfig = now
-	}
-	if inc := next.Incident; inc != nil {
-		if inc.Durations.Diagnose == 0 {
-			inc.Durations.Diagnose = now.Sub(inc.Opened)
+	if !mayAdvance {
+		next.OperationBlocked = "operation deadline exceeded; outcome is unresolved"
+		if next.Unsafe != "" {
+			next.OperationBlocked = next.Unsafe
+		} else if current.observationTimedOut {
+			next.OperationBlocked = "no admitted member could be read before the observation deadline"
 		}
-		affect(next, inc, reconfig.Remove)
+		next.Reason = next.OperationBlocked
 	}
-	return fsm.apply(ctx, next, current, &reconfig, plan, now)
-}
-
-func (fsm *controller) resend(ctx context.Context, next *Record, current *view, progress *engine.Progress, now time.Time) error {
-	reconfig := *next.Reconfig
-	plan := engine.Plan{
-		Kind: engine.Change, Participants: reconfig.Participants, Remove: reconfig.Remove, Add: reconfig.Add,
-		Reason: "resent: no member got it",
-	}
-	if reason := checkPlan(next, current, &plan); reason != "" {
-		fsm.finishReconfig(next, &engine.Progress{State: engine.NotStarted, Reason: reason}, now)
-		next.Reason = "dropped " + reconfig.ID + ", no member got it: " + reason
-		if next.Phase == Recovering {
-			next.Since = now
-		}
-		return nil
-	}
-	next.ReconfigSince = now
-	next.Reason = plan.Reason + ": " + progress.Reason
-	return fsm.apply(ctx, next, current, &reconfig, &plan, now)
-}
-
-func (fsm *controller) apply(
-	ctx context.Context, next *Record, current *view, reconfig *engine.Reconfig, plan *engine.Plan, now time.Time,
-) error {
-	next.Acceptances = nil
+	next.Operation.Attempted = true
 	if err := fsm.save(ctx, next); err != nil {
 		return err
 	}
-	acceptances, err := fsm.eng.Apply(ctx, current.obs, *reconfig)
-	fsm.recorder.ReconfigStarted(reconfig, plan)
-	if ctx.Err() != nil {
-		return ctx.Err()
+	if !operation.Attempted && operation.Action.Kind == engine.Change {
+		reconfig := operation.Reconfig()
+		fsm.recorder.ReconfigStarted(&reconfig, &operation.Action)
 	}
-	next.Acceptances = acceptances
+	callTimeout := fsm.config.ApplyTimeout / 2
+	if remaining := fsm.config.ApplyTimeout - now.Sub(next.OperationSince); mayAdvance && remaining < callTimeout {
+		callTimeout = remaining
+	}
+	callCtx, cancel := context.WithTimeout(ctx, callTimeout)
+	defer cancel()
+	report, err := fsm.eng.Apply(callCtx, engine.ApplyInput{Observation: current.obs, Operation: operation, MayAdvance: mayAdvance})
+	if report.Checkpoint != nil {
+		if !json.Valid(report.Checkpoint) {
+			return errors.New("engine execution checkpoint must be valid JSON")
+		}
+		next.Operation.Checkpoint = slices.Clone(report.Checkpoint)
+	}
 	if err != nil {
-		fsm.finishReconfig(next, &engine.Progress{State: engine.Failed, Scope: engine.Group, Reason: err.Error()}, now)
-		return fsm.resetAll(ctx, next, ResetReconfigFailed, err.Error(), now)
+		next.Reason = err.Error()
+		if saveErr := fsm.save(ctx, next); saveErr != nil {
+			return saveErr
+		}
+		return err
+	}
+	switch report.State {
+	case engine.Succeeded:
+		if next.Unsafe != "" && operation.Action.Kind == engine.Change {
+			fsm.failedChange(next, engine.Group, next.Unsafe, now)
+			return nil
+		}
+		for _, id := range operation.Action.Remove {
+			next.Members[id] = Excluded
+		}
+		for _, id := range operation.Action.Add {
+			next.Members[id] = Admitted
+		}
+		fsm.finish(next, engine.Succeeded, "", report.Reason, now)
+	case engine.Failed:
+		if operation.Action.Kind == engine.Change {
+			fsm.failedChange(next, report.Scope, report.Reason, now)
+		} else {
+			fsm.finish(next, engine.Failed, report.Scope, report.Reason, now)
+		}
+	case engine.Running:
+		if next.OperationBlocked == "" {
+			next.Reason = report.Reason
+		}
+	default:
+		return fmt.Errorf("unknown apply status %q", report.State)
 	}
 	return nil
 }
 
-func checkPlan(next *Record, current *view, plan *engine.Plan) string {
+func (fsm *controller) failedChange(next *Record, scope engine.FailureScope, reason string, now time.Time) {
+	plan := &next.Operation.Action
+	if scope == engine.Joiners && len(plan.Add) > 0 && len(plan.Remove) == 0 {
+		for _, id := range plan.Add {
+			next.Members[id] = Rejected
+		}
+	} else {
+		scope = engine.Group
+		next.Unsafe = "membership outcome is uncertain: " + reason
+	}
+	fsm.finish(next, engine.Failed, scope, reason, now)
+}
+
+func (fsm *controller) finish(next *Record, state engine.Status, scope engine.FailureScope, reason string, now time.Time) {
+	operation := *next.Operation
+	next.Result = &engine.Result{Operation: operation, State: state, Scope: scope, Reason: reason}
+	if operation.Action.Kind == engine.Verify && next.Incident != nil {
+		next.Incident.Durations.Verify += now.Sub(next.OperationSince)
+	}
+	if operation.Action.Kind == engine.Change {
+		reconfig, progress := operation.Reconfig(), engine.Report{State: state, Scope: scope, Reason: reason}
+		if inc := next.Incident; inc != nil {
+			inc.Reconfigs = append(inc.Reconfigs, ReconfigResult{Reconfig: reconfig, Report: progress})
+			inc.Durations.Apply += now.Sub(next.OperationSince)
+		}
+		fsm.later(func() { fsm.recorder.ReconfigFinished(&reconfig, progress) })
+	}
+	next.Operation, next.OperationSince, next.Workload = nil, time.Time{}, nil
+	next.OperationBlocked = ""
+}
+
+func checkAction(next *Record, current *view, plan *engine.Action) string {
+	if plan.State != nil && !json.Valid(plan.State) {
+		return "policy state must be valid JSON"
+	}
+	if plan.Payload != nil && !json.Valid(plan.Payload) {
+		return "engine payload must be valid JSON"
+	}
+	if next.Unsafe != "" && plan.Kind != engine.Wait && plan.Kind != engine.RecreateGroup {
+		return "unresolved group safety fault: " + next.Unsafe
+	}
+	if next.Phase == Starting && (plan.Kind == engine.Change || plan.Kind == engine.ReplaceMembers) {
+		return "group has not been adopted"
+	}
+	switch plan.Kind {
+	case engine.Healthy:
+		for _, id := range current.admitted {
+			if member := current.members[id]; member == nil || !member.Serving || member.Unknown {
+				return fmt.Sprintf("member %s is not observed serving", id)
+			}
+		}
+	case engine.Wait, engine.Probe, engine.RecreateGroup:
+	case engine.Verify:
+		if len(plan.Participants) == 0 {
+			return "verification needs participants"
+		}
+		for _, id := range plan.Participants {
+			member := current.members[id]
+			if next.Members[id] != Admitted || member == nil || member.Unknown {
+				return fmt.Sprintf("cannot verify member %s", id)
+			}
+		}
+	case engine.Change:
+		return checkPlan(next, current, plan)
+	case engine.ReplaceMembers:
+		return checkReplacement(next, plan)
+	default:
+		return fmt.Sprintf("unknown action %q", plan.Kind)
+	}
+	if len(plan.Remove) != 0 || len(plan.Add) != 0 || len(plan.Members) != 0 || plan.Payload != nil {
+		return "action has unrelated targets or payload"
+	}
+	return ""
+}
+
+func checkPlan(next *Record, current *view, plan *engine.Action) string {
+	if len(plan.Members) > 0 {
+		return "engine change cannot also request replacement resources"
+	}
 	seen := map[engine.MemberID]bool{}
 	for _, list := range [][]engine.MemberID{plan.Participants, plan.Remove, plan.Add} {
 		for _, id := range list {
@@ -136,6 +179,9 @@ func checkPlan(next *Record, current *view, plan *engine.Plan) string {
 				return fmt.Sprintf("C3: member %s is named twice", id)
 			}
 			seen[id] = true
+			if current.members[id] == nil || current.members[id].Unknown {
+				return fmt.Sprintf("C7: member %s is not observed", id)
+			}
 		}
 	}
 	if len(plan.Participants) == 0 {
@@ -147,78 +193,28 @@ func checkPlan(next *Record, current *view, plan *engine.Plan) string {
 		}
 	}
 	for _, id := range plan.Remove {
-		if member := current.members[id]; member == nil || !member.Terminal {
+		if !current.members[id].Terminal {
 			return fmt.Sprintf("C1: member %s is not terminal", id)
 		}
 	}
+	replacements := map[engine.MemberID]bool{}
 	for _, id := range plan.Add {
 		member := current.members[id]
-		if next.Members[id] != Candidate || member == nil || !member.Joinable || !joinable(next, current.group, member) {
+		if next.Members[id] != Candidate || !member.Joinable ||
+			!joinable(next, current.group, member) || !replacementAllowed(next, member) {
 			return fmt.Sprintf("C2: member %s cannot join", id)
+		}
+		if previous := member.Replaces; previous != "" {
+			if replacements[previous] {
+				return "C2: a member has more than one replacement"
+			}
+			replacements[previous] = true
+			for otherID, other := range current.members {
+				if other.Replaces == previous && next.Members[otherID] == Admitted {
+					return "C2: replacement is already admitted"
+				}
+			}
 		}
 	}
 	return ""
-}
-
-func (fsm *controller) verify(ctx context.Context, next *Record, current *view, now time.Time) error {
-	// A Verify that outlives its share of the step is a failed check, not a stall.
-	verifyCtx, cancel := context.WithTimeout(ctx, fsm.config.ApplyTimeout/2)
-	err := fsm.eng.Verify(verifyCtx, current.obs, next.Verifying)
-	cancel()
-	if ctx.Err() != nil {
-		return ctx.Err()
-	}
-	if err == nil {
-		next.Verifying, next.VerifyFailedSince, next.Reason = nil, time.Time{}, "verified"
-		if inc := next.Incident; inc != nil {
-			inc.Durations.Verify = now.Sub(next.Since)
-			fsm.closeIncident(next, outcome(inc), now)
-		}
-		return nil
-	}
-	if next.VerifyFailedSince.IsZero() && fsm.config.VerifyTimeout > 0 {
-		next.VerifyFailedSince, next.Reason = now, "verify failed; retrying: "+err.Error()
-		return nil
-	}
-	if now.Sub(next.VerifyFailedSince) < fsm.config.VerifyTimeout {
-		return nil
-	}
-	return fsm.resetAll(ctx, next, ResetVerifyFailed, err.Error(), now)
-}
-
-func (fsm *controller) resetAll(ctx context.Context, next *Record, reason ResetReason, detail string, now time.Time) error {
-	if fsm.would("reset all: " + string(reason)) {
-		return nil
-	}
-	if next.Reconfig != nil {
-		fsm.finishReconfig(next, &engine.Progress{State: engine.Running, Reason: "dropped by reset"}, now)
-	}
-	for uid, pod := range next.Pods {
-		pod.Removing = true
-		next.Pods[uid] = pod
-	}
-	next.Members, next.Verifying, next.VerifyFailedSince, next.LastNoChangeReconfig = nil, nil, time.Time{}, time.Time{}
-	next.UnseenSince, next.UnseenByDiscover = time.Time{}, false
-	if inc := next.Incident; inc != nil && inc.Durations.Diagnose == 0 {
-		inc.Durations.Diagnose = now.Sub(inc.Opened)
-	}
-	fsm.closeIncident(next, Reset, now)
-	enter(next, Starting, string(reason)+": "+detail, now)
-	if err := fsm.save(ctx, next); err != nil {
-		return err
-	}
-	pods := refs(next)
-	fsm.called(fsm.wl.ResetAll(ctx, pods))
-	fsm.recorder.ResetAllRequested(reason, pods)
-	return nil
-}
-
-func (fsm *controller) finishReconfig(next *Record, progress *engine.Progress, now time.Time) {
-	reconfig, result := *next.Reconfig, *progress
-	if inc := next.Incident; inc != nil {
-		inc.Reconfigs = append(inc.Reconfigs, ReconfigResult{Reconfig: reconfig, Progress: result})
-		inc.Durations.Apply += now.Sub(next.ReconfigSince)
-	}
-	next.Reconfig, next.ReconfigSince, next.Acceptances = nil, time.Time{}, nil
-	fsm.later(func() { fsm.recorder.ReconfigFinished(&reconfig, result) })
 }

@@ -6,6 +6,7 @@ package enginefault
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/llm-d/llm-d-resiliency-operator/internal/engine"
@@ -16,15 +17,17 @@ type Controller interface {
 }
 
 type Config struct {
-	PollInterval     time.Duration
-	DiagnosisTimeout time.Duration
-	ApplyTimeout     time.Duration
-	VerifyTimeout    time.Duration
-	UnseenTimeout    time.Duration
-	FlapWindow       time.Duration
-	CapacityRestore  CapacityRestore
-	// DryRun decides as usual but only records what it would do. See docs/components/controller.md#dry-run.
-	DryRun bool
+	PollInterval         time.Duration
+	DiagnosisTimeout     time.Duration
+	ApplyTimeout         time.Duration
+	VerifyTimeout        time.Duration
+	UnseenTimeout        time.Duration
+	FlapWindow           time.Duration
+	CapacityRestore      CapacityRestore
+	RecoveryMaxActions   int
+	RecoveryTimeout      time.Duration
+	RecoveryStablePeriod time.Duration
+	DryRun               bool
 }
 
 type CapacityRestore string
@@ -61,26 +64,28 @@ type PodRecord struct {
 
 // Record is what the journal stores.
 type Record struct {
-	Phase  Phase     `json:"phase"`
-	Since  time.Time `json:"since"`
-	Reason string    `json:"reason"`
+	Version int       `json:"version"`
+	Phase   Phase     `json:"phase"`
+	Since   time.Time `json:"since"`
+	Reason  string    `json:"reason"`
 
 	Pods    map[string]PodRecord            `json:"pods"`
 	Members map[engine.MemberID]MemberState `json:"members"`
 
-	Reconfig      *engine.Reconfig    `json:"reconfig,omitempty"`
-	ReconfigSince time.Time           `json:"reconfig_since,omitzero"`
-	Acceptances   []engine.Acceptance `json:"acceptances,omitempty"`
-	Verifying     []engine.MemberID   `json:"verifying,omitempty"`
+	Epoch            time.Time         `json:"epoch"`
+	PolicyState      json.RawMessage   `json:"policy_state,omitempty"`
+	Operation        *engine.Operation `json:"operation,omitempty"`
+	OperationSince   time.Time         `json:"operation_since,omitzero"`
+	OperationBlocked string            `json:"operation_blocked,omitempty"`
+	Workload         *WorkloadAction   `json:"workload,omitempty"`
+	Result           *engine.Result    `json:"result,omitempty"`
+	Unsafe           string            `json:"unsafe,omitempty"`
+	Budget           RecoveryBudget    `json:"budget,omitzero"`
 
-	LastNoChangeReconfig time.Time `json:"last_no_change_reconfig,omitzero"`
-	VerifyFailedSince    time.Time `json:"verify_failed_since,omitzero"`
-	UnseenSince          time.Time `json:"unseen_since,omitzero"`
-	UnseenByDiscover     bool      `json:"unseen_by_discover,omitempty"`
-	RecreateStopped      bool      `json:"recreate_stopped,omitempty"`
+	UnseenSince      time.Time `json:"unseen_since,omitzero"`
+	UnseenByDiscover bool      `json:"unseen_by_discover,omitempty"`
+	RecreateStopped  bool      `json:"recreate_stopped,omitempty"`
 
 	Incident *Incident `json:"incident,omitempty"`
-
-	// WouldDo is the action a dry run skipped on the last poll.
-	WouldDo string `json:"would_do,omitempty"`
+	WouldDo  string    `json:"would_do,omitempty"`
 }

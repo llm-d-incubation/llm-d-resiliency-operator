@@ -28,7 +28,7 @@ func (twoPodGroup) Discover(context.Context) (workload.Group, error) {
 	}}, nil
 }
 
-// deadEngine reports m<i> dead when dead[i] is set. Apply, Probe and Verify are left nil.
+// deadEngine reports m<i> dead when dead[i] is set. Apply is left nil.
 type deadEngine struct {
 	engine.Engine
 	dead [2]bool
@@ -46,9 +46,10 @@ func (eng *deadEngine) Observe(context.Context, []workload.Pod) engine.Observati
 	return obs
 }
 
-func (eng *deadEngine) Plan(obs engine.Observation, admitted, _ []engine.MemberID) engine.Plan {
+//nolint:gocritic // The policy contract passes DecisionInput by value.
+func (*deadEngine) Decide(input engine.DecisionInput) engine.Action {
 	var alive, dead []engine.MemberID
-	for _, member := range obs.Members {
+	for _, member := range input.Observation.Members {
 		if member.Terminal {
 			dead = append(dead, member.ID())
 		} else {
@@ -56,12 +57,12 @@ func (eng *deadEngine) Plan(obs engine.Observation, admitted, _ []engine.MemberI
 		}
 	}
 	switch {
-	case len(dead) == 0 && len(alive) == len(admitted):
-		return engine.Plan{Kind: engine.Healthy, Reason: "all serve"}
+	case len(dead) == 0 && len(alive) == len(input.Admitted):
+		return engine.Action{Kind: engine.Healthy, Reason: "all serve"}
 	case len(alive) == 0:
-		return engine.Plan{Kind: engine.Unrecoverable, Reason: "all dead"}
+		return engine.Action{Kind: engine.RecreateGroup, Reason: "all dead"}
 	}
-	return engine.Plan{Kind: engine.Change, Participants: alive, Remove: dead, Reason: "remove dead"}
+	return engine.Action{Kind: engine.Change, Participants: alive, Remove: dead, Reason: "remove dead"}
 }
 
 type memoryStore struct{ data []byte }
@@ -86,7 +87,8 @@ func TestDryRunLogsOnlyChanges(t *testing.T) {
 	config := enginefault.Defaults()
 	// The diagnosis deadline passes on every poll: a skipped reconfig must not turn into a reset.
 	config.DryRun, config.PollInterval, config.DiagnosisTimeout = true, 0, time.Nanosecond
-	fsm, err := enginefault.New(t.Context(), twoPodGroup{}, eng, &memoryStore{}, telemetry.New(log, 0), config)
+	store := &memoryStore{}
+	fsm, err := enginefault.New(t.Context(), twoPodGroup{}, eng, store, telemetry.New(log, 0), config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,9 +106,12 @@ func TestDryRunLogsOnlyChanges(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if len(store.data) != 0 {
+		t.Fatal("dry run wrote the journal")
+	}
 	want := []string{
 		"would reconfig: remove [m1@p1], add []",
-		"would reset all: unrecoverable",
+		"would reset-all [{p0 u0} {p1 u1}]",
 		"nothing to do any more",
 	}
 	if !slices.Equal(logged, want) {

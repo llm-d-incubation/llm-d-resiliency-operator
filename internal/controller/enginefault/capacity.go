@@ -7,100 +7,131 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"slices"
 	"time"
 
+	"github.com/llm-d/llm-d-resiliency-operator/internal/engine"
 	"github.com/llm-d/llm-d-resiliency-operator/internal/workload"
 )
 
-func (fsm *controller) restore(ctx context.Context, next *Record, current *view, now time.Time) error {
-	mode := fsm.config.CapacityRestore
-	if mode == RestoreResetAll {
-		for _, state := range next.Members {
-			if state == Excluded || state == Rejected {
-				return fsm.resetAll(ctx, next, ResetCapacity, "restoring capacity", now)
+type WorkloadAction struct {
+	Kind CapacityRestore   `json:"kind"`
+	Pods []workload.PodRef `json:"pods"`
+}
+
+func externalAction(kind engine.ActionKind) bool {
+	return kind == engine.ReplaceMembers || kind == engine.RecreateGroup
+}
+
+func checkReplacement(next *Record, action *engine.Action) string {
+	if len(action.Members) == 0 || len(action.Participants)+len(action.Remove)+len(action.Add) > 0 || action.Payload != nil {
+		return "replacement requirement needs only member targets"
+	}
+	seen := map[engine.MemberID]bool{}
+	for _, id := range action.Members {
+		if seen[id] || (next.Members[id] != Excluded && next.Members[id] != Rejected) {
+			return fmt.Sprintf("member %s is not a unique excluded or rejected target", id)
+		}
+		seen[id] = true
+	}
+	return ""
+}
+
+func (fsm *controller) selectWorkload(next *Record, current *view, action *engine.Action) (*WorkloadAction, engine.Report) {
+	if action.Kind == engine.RecreateGroup || fsm.config.CapacityRestore == RestoreResetAll {
+		return &WorkloadAction{Kind: RestoreResetAll, Pods: refs(next)}, engine.Report{}
+	}
+	if fsm.config.CapacityRestore == RestoreResetPod && !fsm.eng.Capabilities().Grow {
+		return nil, engine.Report{State: engine.Succeeded, Reason: "reduced capacity retained; engine cannot admit replacements"}
+	}
+	selected := &WorkloadAction{Kind: fsm.config.CapacityRestore}
+	for _, id := range action.Members {
+		uid, saved, found := podOf(next, id)
+		if !found || find(current.group, uid) == nil {
+			continue
+		}
+		pod := find(current.group, uid)
+		if saved.Removing || pod.Identity != saved.Identity || !onlyExcluded(next, saved.Identity) {
+			return nil, engine.Report{State: engine.Failed, Reason: "replacement would affect a Pod with live or uncertain members"}
+		}
+		if !slices.ContainsFunc(selected.Pods, func(ref workload.PodRef) bool { return ref.UID == uid }) {
+			selected.Pods = append(selected.Pods, podRef(uid, &saved))
+		}
+	}
+	if len(selected.Pods) == 0 {
+		return nil, engine.Report{State: engine.Succeeded, Reason: "target Pods are already absent"}
+	}
+	return selected, engine.Report{}
+}
+
+func (fsm *controller) watchPods(ctx context.Context, next *Record, group *workload.Group, now time.Time) error {
+	if fsm.config.DryRun {
+		fsm.wouldDo = describeAction(&next.Operation.Action, next.Workload)
+		return nil
+	}
+	action := *next.Workload
+	var present []workload.PodRef
+	for _, target := range action.Pods {
+		if find(group, target.UID) != nil {
+			present = append(present, target)
+		}
+	}
+	if len(present) == 0 {
+		fsm.finish(next, engine.Succeeded, "", "target Pods are gone", now)
+		if action.Kind == RestoreResetAll {
+			fsm.closeIncident(next, Reset, now)
+			next.Members, next.Pods, next.Unsafe = nil, nil, ""
+			enter(next, Starting, "group reset completed", now)
+		} else {
+			for _, target := range action.Pods {
+				forget(next, target.UID)
 			}
 		}
 		return nil
 	}
-	var targets []workload.PodRef
-	for _, uid := range slices.Sorted(maps.Keys(next.Pods)) {
-		saved := next.Pods[uid]
-		if saved.Removing || !onlyExcluded(next, saved.Identity) {
-			continue
-		}
-		if find(current.group, uid) == nil {
-			forget(next, uid)
-			continue
-		}
-		saved.Removing = true
-		next.Pods[uid] = saved
-		targets = append(targets, podRef(uid, &saved))
-	}
-	switch {
-	case len(targets) == 0:
+	if now.Sub(next.OperationSince) >= fsm.config.ApplyTimeout {
+		next.OperationBlocked = "Pod operation deadline exceeded; outcome is unresolved"
+		next.Reason = next.OperationBlocked
 		return nil
-	case mode == RestoreResetPod && !fsm.eng.Capabilities().Grow:
-		for _, pod := range targets {
-			keep(next, pod.UID)
-		}
+	}
+	if group.Recreating || group.RecreateStopped {
 		return nil
 	}
 	if err := fsm.save(ctx, next); err != nil {
 		return err
 	}
-	fsm.remove(ctx, next, targets, true)
-	return nil
-}
-
-func (fsm *controller) remove(ctx context.Context, next *Record, pods []workload.PodRef, record bool) {
-	release := fsm.config.CapacityRestore == RestoreRelease
-	if fsm.would(fmt.Sprintf("%s %v", fsm.config.CapacityRestore, pods)) {
-		return
-	}
 	var err error
-	if release {
-		err = fsm.wl.Release(ctx, pods)
-	} else {
-		err = fsm.wl.Reset(ctx, pods)
+	switch action.Kind {
+	case RestoreResetPod:
+		err = fsm.wl.Reset(ctx, present)
+		fsm.recorder.PodResetRequested(present, err)
+	case RestoreRelease:
+		err = fsm.wl.Release(ctx, present)
+		fsm.recorder.ReleaseRequested(present, err)
+	case RestoreResetAll:
+		err = fsm.wl.ResetAll(ctx, present)
+		fsm.recorder.ResetAllRequested(ResetPolicy, present)
 	}
-	split := errors.Is(err, workload.ErrUnsupported) && len(pods) > 1
-	switch {
-	case record && !split && release:
-		fsm.recorder.ReleaseRequested(pods, err)
-	case record && !split:
-		fsm.recorder.PodResetRequested(pods, err)
+	if ctx.Err() != nil {
+		return ctx.Err()
 	}
-	switch {
-	case split:
-		for _, pod := range pods {
-			fsm.remove(ctx, next, []workload.PodRef{pod}, record)
+	if errors.Is(err, workload.ErrUnsupported) {
+		for _, target := range action.Pods {
+			pod := next.Pods[target.UID]
+			pod.Removing = false
+			next.Pods[target.UID] = pod
 		}
-	case errors.Is(err, workload.ErrUnsupported):
-		keep(next, pods[0].UID)
-	default:
-		fsm.called(err)
+		fsm.finish(next, engine.Failed, engine.Group, err.Error(), now)
+		return nil
 	}
-}
-
-// keep leaves a Pod as it is: its members stay out until the next group.
-func keep(next *Record, uid string) {
-	saved := next.Pods[uid]
-	saved.Removing = false
-	next.Pods[uid] = saved
-	for id, state := range next.Members {
-		if identityOf(id) == saved.Identity && state == Excluded {
-			next.Members[id] = Rejected
-		}
-	}
+	return err
 }
 
 func onlyExcluded(next *Record, identity string) bool {
 	found := false
 	for id, state := range next.Members {
 		if identityOf(id) == identity {
-			if state != Excluded {
+			if state != Excluded && state != Rejected {
 				return false
 			}
 			found = true

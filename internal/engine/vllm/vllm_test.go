@@ -257,11 +257,11 @@ func TestObserveRejectsWrongRank(t *testing.T) {
 	}
 }
 
-func TestPlan(t *testing.T) {
+func TestDecide(t *testing.T) {
 	t.Parallel()
 	for name, test := range map[string]struct {
 		setup  func([]*fakeRank)
-		kind   engine.PlanKind
+		kind   engine.ActionKind
 		remove []engine.MemberID
 		joined int
 	}{
@@ -315,14 +315,17 @@ func TestPlan(t *testing.T) {
 					fake.set("dead", nil)
 				}
 			},
-			kind: engine.Unrecoverable,
+			kind: engine.RecreateGroup,
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			fleet := newFleet(t, 4, 1)
 			test.setup(fleet.ranks)
-			plan := fleet.eng.Plan(fleet.observe(t), four, nil)
+			input := policyInput(four)
+			input.State = json.RawMessage(`{"stage":"diagnosing"}`)
+			input.Observation = fleet.observe(t)
+			plan := fleet.eng.Decide(input)
 			if plan.Kind != test.kind || !slices.Equal(plan.Remove, test.remove) || len(plan.Participants) != test.joined {
 				t.Fatalf("plan %+v", plan)
 			}
@@ -333,7 +336,7 @@ func TestPlan(t *testing.T) {
 	}
 }
 
-func TestPlanSeesControllerLostMembers(t *testing.T) {
+func TestDecideSeesControllerLostMembers(t *testing.T) {
 	t.Parallel()
 	test := newFleet(t, 4, 1)
 	for _, fake := range test.ranks[:3] {
@@ -341,12 +344,15 @@ func TestPlanSeesControllerLostMembers(t *testing.T) {
 	}
 	obs := test.eng.Observe(t.Context(), test.pods[:3])
 	obs.Members = append(obs.Members, engine.Member{Name: "dp3", PodIdentity: "id3", Terminal: true, Detail: "pod lost"})
-	if plan := test.eng.Plan(obs, four, nil); plan.Kind != engine.Change || !slices.Equal(plan.Remove, ids("dp3@id3")) {
+	input := policyInput(four)
+	input.State = json.RawMessage(`{"stage":"diagnosing"}`)
+	input.Observation = obs
+	if plan := test.eng.Decide(input); plan.Kind != engine.Change || !slices.Equal(plan.Remove, ids("dp3@id3")) {
 		t.Fatalf("plan %+v", plan)
 	}
 }
 
-func TestProgress(t *testing.T) {
+func TestApplyReportsObservedOutcome(t *testing.T) {
 	t.Parallel()
 	reconfig := engine.Reconfig{ID: "iro-ft-1", Participants: ids("dp0@id0", "dp2@id2", "dp3@id3"), Remove: ids("dp1@id1")}
 	ft := func(state, request string) map[string]any {
@@ -354,28 +360,33 @@ func TestProgress(t *testing.T) {
 	}
 	for name, test := range map[string]struct {
 		setup func([]*fakeRank)
-		state engine.ProgressState
+		state engine.Status
 	}{
 		"succeeded":     {setup: func(r []*fakeRank) { r[1].set("dead", nil) }, state: engine.Succeeded},
 		"running":       {setup: func(r []*fakeRank) { r[2].set("unhealthy", ft("recovering", "iro-ft-1")) }, state: engine.Running},
 		"rejected":      {setup: func(r []*fakeRank) { r[2].set("healthy", ft("failed", "iro-ft-1")) }, state: engine.Failed},
-		"other request": {setup: func(r []*fakeRank) { r[3].set("unhealthy", ft("recovering", "other")) }, state: engine.Failed},
+		"other request": {setup: func(r []*fakeRank) { r[3].set("unhealthy", ft("recovering", "other")) }, state: engine.Running},
+		"other completed request": {setup: func(r []*fakeRank) {
+			r[3].set("healthy", ft("succeeded", "other"))
+		}, state: engine.Running},
 		"stale failure": {setup: func(r []*fakeRank) { r[3].set("unhealthy", ft("failed", "older")) }, state: engine.Running},
 		"vote failed":   {setup: func(r []*fakeRank) { r[0].set("dead", nil) }, state: engine.Failed},
 		"unreachable":   {setup: func(r []*fakeRank) { r[3].down = true }, state: engine.Running},
-		"faulted again": {setup: func(r []*fakeRank) { r[0].unhealthy() }, state: engine.Failed},
+		"faulted again": {setup: func(r []*fakeRank) { r[0].unhealthy() }, state: engine.Running},
 		"never sent": {setup: func(r []*fakeRank) {
 			for _, rank := range r {
 				rank.unhealthy()
 			}
-		}, state: engine.Failed},
+		}, state: engine.Running},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			fleet := newFleet(t, 4, 1)
 			test.setup(fleet.ranks)
-			progress := fleet.eng.Progress(fleet.observe(t), reconfig)
-			if progress.State != test.state || (progress.State == engine.Failed) != (progress.Scope == engine.Group) {
+			progress, err := fleet.eng.Apply(t.Context(), engine.ApplyInput{
+				Observation: fleet.observe(t), Operation: operation(&reconfig, true), MayAdvance: false,
+			})
+			if err != nil || progress.State != test.state || (progress.State == engine.Failed) != (progress.Scope == engine.Group) {
 				t.Fatalf("progress %+v", progress)
 			}
 		})
@@ -387,10 +398,13 @@ func TestApply(t *testing.T) {
 	t.Run("scale down", func(t *testing.T) {
 		t.Parallel()
 		test := newFleet(t, 4, 1)
+		for _, rank := range test.ranks {
+			rank.unhealthy()
+		}
 		reconfig := engine.Reconfig{ID: "r1", Participants: ids("dp0@id0", "dp2@id2", "dp3@id3"), Remove: ids("dp1@id1")}
-		acceptances, err := test.eng.Apply(t.Context(), terminal(test.observe(t), "dp1@id1"), reconfig)
-		if err != nil || len(acceptances) != 3 || len(test.ranks[1].applied) != 0 {
-			t.Fatalf("acceptances %+v, err %v", acceptances, err)
+		report, err := test.apply(t, terminal(test.observe(t), "dp1@id1"), &reconfig)
+		if err != nil || report.State != engine.Running || len(test.ranks[1].applied) != 0 {
+			t.Fatalf("report %+v, err %v", report, err)
 		}
 		payload := test.ranks[0].applied[0]
 		found := params(t, payload)
@@ -402,8 +416,11 @@ func TestApply(t *testing.T) {
 	t.Run("store host removed", func(t *testing.T) {
 		t.Parallel()
 		test := newFleet(t, 4, 1)
+		for _, rank := range test.ranks {
+			rank.unhealthy()
+		}
 		reconfig := engine.Reconfig{ID: "r2", Participants: ids("dp2@id2", "dp1@id1"), Remove: ids("dp3@id3", "dp0@id0")}
-		if _, err := test.eng.Apply(t.Context(), terminal(test.observe(t), "dp3@id3", "dp0@id0"), reconfig); err != nil {
+		if _, err := test.apply(t, terminal(test.observe(t), "dp3@id3", "dp0@id0"), &reconfig); err != nil {
 			t.Fatal(err)
 		}
 		found := params(t, test.ranks[2].applied[0])
@@ -415,10 +432,13 @@ func TestApply(t *testing.T) {
 	t.Run("lost member removed", func(t *testing.T) {
 		t.Parallel()
 		test := newFleet(t, 4, 1)
+		for _, rank := range test.ranks {
+			rank.unhealthy()
+		}
 		obs := test.eng.Observe(t.Context(), test.pods[:3])
 		obs.Members = append(obs.Members, lost(&test.pods[3], "dp3"))
 		reconfig := engine.Reconfig{ID: "r6", Participants: ids("dp0@id0", "dp1@id1", "dp2@id2"), Remove: ids("dp3@id3")}
-		if _, err := test.eng.Apply(t.Context(), obs, reconfig); err != nil {
+		if _, err := test.apply(t, obs, &reconfig); err != nil {
 			t.Fatal(err)
 		}
 		for _, rank := range test.ranks[:3] {
@@ -431,10 +451,13 @@ func TestApply(t *testing.T) {
 	t.Run("lost store host", func(t *testing.T) {
 		t.Parallel()
 		test := newFleet(t, 4, 1)
+		for _, rank := range test.ranks {
+			rank.unhealthy()
+		}
 		obs := test.eng.Observe(t.Context(), test.pods[1:])
 		obs.Members = append(obs.Members, lost(&test.pods[0], "dp0"))
 		reconfig := engine.Reconfig{ID: "r7", Participants: ids("dp1@id1", "dp2@id2", "dp3@id3"), Remove: ids("dp0@id0")}
-		if _, err := test.eng.Apply(t.Context(), obs, reconfig); err != nil {
+		if _, err := test.apply(t, obs, &reconfig); err != nil {
 			t.Fatal(err)
 		}
 		if found := params(t, test.ranks[1].applied[0]); found["dp_master_ip"] != "10.0.0.2" || found["dp_store_port"] != 29601.0 {
@@ -449,7 +472,10 @@ func TestApply(t *testing.T) {
 		t.Run(name+" is refused before sending", func(t *testing.T) {
 			t.Parallel()
 			test := newFleet(t, 3, 1)
-			if _, err := test.eng.Apply(t.Context(), terminal(test.observe(t), "dp1@id1"), reconfig); err == nil {
+			for _, rank := range test.ranks {
+				rank.unhealthy()
+			}
+			if _, err := test.apply(t, terminal(test.observe(t), "dp1@id1"), &reconfig); err == nil {
 				t.Fatal("Apply sent a reconfig it should refuse")
 			}
 			for _, rank := range test.ranks {
@@ -462,10 +488,13 @@ func TestApply(t *testing.T) {
 	t.Run("an unreachable participant is refused before sending", func(t *testing.T) {
 		t.Parallel()
 		test := newFleet(t, 2, 1)
+		for _, rank := range test.ranks {
+			rank.unhealthy()
+		}
 		test.ranks[1].down = true
 		obs := test.observe(t)
 		test.ranks[1].down = false
-		if _, err := test.eng.Apply(t.Context(), obs, engine.Reconfig{ID: "r11", Participants: ids("dp0@id0", "dp1@id1")}); err == nil {
+		if _, err := test.apply(t, obs, &engine.Reconfig{ID: "r11", Participants: ids("dp0@id0", "dp1@id1")}); err == nil {
 			t.Fatal("Apply sent to a rank it could not read")
 		}
 		if len(test.ranks[0].applied) != 0 {
@@ -475,12 +504,15 @@ func TestApply(t *testing.T) {
 	t.Run("a second store move in one Pod uses another port", func(t *testing.T) {
 		t.Parallel()
 		test := newFleet(t, 1, 4)
+		for _, rank := range test.ranks {
+			rank.unhealthy()
+		}
 		first := engine.Reconfig{ID: "r12", Participants: ids("dp1@id0", "dp2@id0", "dp3@id0"), Remove: ids("dp0@id0")}
-		if _, err := test.eng.Apply(t.Context(), terminal(test.observe(t), "dp0@id0"), first); err != nil {
+		if _, err := test.apply(t, terminal(test.observe(t), "dp0@id0"), &first); err != nil {
 			t.Fatal(err)
 		}
 		second := engine.Reconfig{ID: "r13", Participants: ids("dp2@id0", "dp3@id0"), Remove: ids("dp1@id0")}
-		if _, err := test.eng.Apply(t.Context(), terminal(test.observe(t), "dp0@id0", "dp1@id0"), second); err != nil {
+		if _, err := test.apply(t, terminal(test.observe(t), "dp0@id0", "dp1@id0"), &second); err != nil {
 			t.Fatal(err)
 		}
 		before, after := params(t, test.ranks[1].applied[0]), params(t, test.ranks[2].applied[1])
@@ -491,8 +523,11 @@ func TestApply(t *testing.T) {
 	t.Run("retry", func(t *testing.T) {
 		t.Parallel()
 		test := newFleet(t, 2, 1)
+		for _, rank := range test.ranks {
+			rank.unhealthy()
+		}
 		reconfig := engine.Reconfig{ID: "r3", Participants: ids("dp0@id0", "dp1@id1")}
-		if _, err := test.eng.Apply(t.Context(), test.observe(t), reconfig); err != nil {
+		if _, err := test.apply(t, test.observe(t), &reconfig); err != nil {
 			t.Fatal(err)
 		}
 		if payload := test.ranks[1].applied[0]; payload["instruction"] != "retry" || len(params(t, payload)) != 0 {
@@ -502,18 +537,24 @@ func TestApply(t *testing.T) {
 	t.Run("one rank does not accept", func(t *testing.T) {
 		t.Parallel()
 		test := newFleet(t, 2, 1)
+		for _, rank := range test.ranks {
+			rank.unhealthy()
+		}
 		obs := test.observe(t)
 		test.ranks[1].down = true
-		acceptances, err := test.eng.Apply(t.Context(), obs, engine.Reconfig{ID: "r4", Participants: ids("dp0@id0", "dp1@id1")})
-		if err == nil || !acceptances[0].Accepted || acceptances[1].Accepted {
-			t.Fatalf("acceptances %+v, err %v", acceptances, err)
+		report, err := test.apply(t, obs, &engine.Reconfig{ID: "r4", Participants: ids("dp0@id0", "dp1@id1")})
+		if err == nil || report.State != engine.Running || len(test.ranks[0].applied) != 1 || len(test.ranks[1].applied) != 0 {
+			t.Fatalf("report %+v, err %v", report, err)
 		}
 	})
 	t.Run("add", func(t *testing.T) {
 		t.Parallel()
 		test := newFleet(t, 2, 1)
+		for _, rank := range test.ranks {
+			rank.unhealthy()
+		}
 		reconfig := engine.Reconfig{ID: "r5", Participants: ids("dp0@id0"), Add: ids("dp1@id9")}
-		if _, err := test.eng.Apply(t.Context(), test.observe(t), reconfig); err == nil {
+		if _, err := test.apply(t, test.observe(t), &reconfig); err == nil {
 			t.Fatal("vLLM cannot add members")
 		}
 	})
@@ -523,15 +564,15 @@ func TestVerify(t *testing.T) {
 	t.Parallel()
 	test := newFleet(t, 2, 1)
 	obs := test.observe(t)
-	if err := test.eng.Verify(t.Context(), obs, ids("dp0@id0", "dp1@id1")); err != nil {
+	if err := test.eng.verify(t.Context(), obs, ids("dp0@id0", "dp1@id1")); err != nil {
 		t.Fatal(err)
 	}
 	test.ranks[1].text = ""
-	if err := test.eng.Verify(t.Context(), obs, ids("dp0@id0", "dp1@id1")); err != nil {
+	if err := test.eng.verify(t.Context(), obs, ids("dp0@id0", "dp1@id1")); err != nil {
 		t.Fatal(err)
 	}
 	test.ranks[1].tokens = 0
-	if err := test.eng.Verify(t.Context(), obs, ids("dp0@id0", "dp1@id1")); err == nil || !strings.Contains(err.Error(), "dp1") {
+	if err := test.eng.verify(t.Context(), obs, ids("dp0@id0", "dp1@id1")); err == nil || !strings.Contains(err.Error(), "dp1") {
 		t.Fatalf("err %v", err)
 	}
 }
@@ -540,7 +581,7 @@ func TestProbeWakesServingRanks(t *testing.T) {
 	t.Parallel()
 	test := newFleet(t, 3, 1)
 	test.ranks[1].set("dead", nil)
-	if err := test.eng.Probe(t.Context(), test.observe(t)); err != nil {
+	if err := test.eng.probe(t.Context(), test.observe(t)); err != nil {
 		t.Fatal(err)
 	}
 	if test.ranks[0].prompts != 1 || test.ranks[1].prompts != 0 || test.ranks[2].prompts != 1 {
@@ -598,7 +639,7 @@ func TestAuthenticatedHTTPS(t *testing.T) {
 		t.Fatal(err)
 	}
 	options := Options{
-		APIPort: apiPort, RanksPerPod: 1, StorePort: 29600, Timeout: time.Second,
+		APIPort: apiPort, RanksPerPod: 1, StorePort: 29600, Timeout: 5 * time.Second,
 		APIKeyFile: keyFile, HTTPS: true, CAFile: caFile,
 	}
 	driver, err := options.New()
@@ -609,13 +650,22 @@ func TestAuthenticatedHTTPS(t *testing.T) {
 	if len(observation.Members) != 1 || !observation.Members[0].Serving {
 		t.Fatalf("observation %+v", observation)
 	}
-	if err := driver.Probe(t.Context(), observation); err != nil {
+	input := engine.ApplyInput{
+		Observation: observation, MayAdvance: true,
+		Operation: engine.Operation{ID: "probe", Action: engine.Action{Kind: engine.Probe}},
+	}
+	if report, err := driver.Apply(t.Context(), input); err != nil || report.State != engine.Succeeded {
 		t.Fatal(err)
 	}
-	if _, err := driver.Apply(t.Context(), observation, engine.Reconfig{ID: "secure", Participants: ids("dp0@id0")}); err != nil {
+	fake.unhealthy()
+	observation = driver.Observe(t.Context(), []workload.Pod{{Name: "rank", IP: host, Identity: "id0"}})
+	input.Observation = observation
+	input.Operation = operation(&engine.Reconfig{ID: "secure", Participants: ids("dp0@id0")}, false)
+	if _, err := driver.Apply(t.Context(), input); err != nil {
 		t.Fatal(err)
 	}
-	if err := driver.Verify(t.Context(), observation, ids("dp0@id0")); err != nil {
+	input.Operation = engine.Operation{ID: "verify", Action: engine.Action{Kind: engine.Verify, Participants: ids("dp0@id0")}}
+	if report, err := driver.Apply(t.Context(), input); err != nil || report.State != engine.Succeeded {
 		t.Fatal(err)
 	}
 	options.CAFile = ""
@@ -642,5 +692,119 @@ func TestInvalidCredentials(t *testing.T) {
 				t.Fatal("invalid key accepted")
 			}
 		})
+	}
+}
+
+func operation(reconfig *engine.Reconfig, attempted bool) engine.Operation {
+	return engine.Operation{ID: reconfig.ID, Attempted: attempted, Action: engine.Action{
+		Kind: engine.Change, Participants: reconfig.Participants, Remove: reconfig.Remove, Add: reconfig.Add, Payload: reconfig.Payload,
+	}}
+}
+
+func (test *fleet) apply(t *testing.T, observation engine.Observation, reconfig *engine.Reconfig) (engine.Report, error) {
+	t.Helper()
+	return test.eng.Apply(t.Context(), engine.ApplyInput{
+		Observation: observation, Operation: operation(reconfig, false), MayAdvance: true,
+	})
+}
+
+func TestApplyResumesAfterLostReport(t *testing.T) {
+	t.Parallel()
+	test := newFleet(t, 2, 1)
+	for _, rank := range test.ranks {
+		rank.unhealthy()
+		rank.onApply = func(fake *fakeRank, payload map[string]any) {
+			fake.set("unhealthy", map[string]any{
+				"ft_state": "recovering", "last_ft_request_id": payload["request_id"],
+			})
+		}
+	}
+	op := operation(&engine.Reconfig{ID: "resume", Participants: ids("dp0@id0", "dp1@id1")}, false)
+	input := engine.ApplyInput{Observation: test.observe(t), Operation: op, MayAdvance: true}
+	if report, err := test.eng.Apply(t.Context(), input); err != nil || report.State != engine.Running {
+		t.Fatalf("first Apply: %+v, %v", report, err)
+	}
+	// The submitted call's report was lost; only the pre-call journal survives.
+	op.Attempted = true
+	reloaded := &Engine{options: test.eng.options, client: test.eng.client}
+	for range 3 {
+		input = engine.ApplyInput{Observation: test.observe(t), Operation: op, MayAdvance: true}
+		if report, err := reloaded.Apply(t.Context(), input); err != nil || report.State != engine.Running {
+			t.Fatalf("resumed Apply: %+v, %v", report, err)
+		}
+	}
+	for _, rank := range test.ranks {
+		rank.set("healthy", nil)
+	}
+	input.Observation, input.MayAdvance = test.observe(t), false
+	if report, err := reloaded.Apply(t.Context(), input); err != nil || report.State != engine.Succeeded {
+		t.Fatalf("read-only completion: %+v, %v", report, err)
+	}
+	for _, rank := range test.ranks {
+		if len(rank.applied) != 1 {
+			t.Fatalf("rank %d received %d submissions", rank.rank, len(rank.applied))
+		}
+	}
+}
+
+func TestApplyPreservesSubmissionUncertainty(t *testing.T) {
+	t.Parallel()
+	test := newFleet(t, 2, 1)
+	for _, rank := range test.ranks {
+		rank.unhealthy()
+	}
+	input := engine.ApplyInput{
+		Observation: test.observe(t), MayAdvance: true,
+		Operation: operation(&engine.Reconfig{ID: "uncertain", Participants: ids("dp0@id0", "dp1@id1")}, false),
+	}
+	test.ranks[1].down = true
+	if report, err := test.eng.Apply(t.Context(), input); err == nil || report.State != engine.Running {
+		t.Fatalf("partial submission: %+v, %v", report, err)
+	}
+	test.ranks[1].down = false
+	input.Operation.Attempted = true
+	input.Observation = test.observe(t)
+	reloaded := &Engine{options: test.eng.options, client: test.eng.client}
+	if report, err := reloaded.Apply(t.Context(), input); err != nil || report.State != engine.Running {
+		t.Fatalf("uncertain outcome: %+v, %v", report, err)
+	}
+	if len(test.ranks[0].applied) != 1 || len(test.ranks[1].applied) != 0 {
+		t.Fatalf("unsafe resend: first %d, second %d", len(test.ranks[0].applied), len(test.ranks[1].applied))
+	}
+}
+
+func TestApplyDoesNotAdvanceWithoutAuthorization(t *testing.T) {
+	t.Parallel()
+	for _, kind := range []engine.ActionKind{engine.Change, engine.Probe, engine.Verify} {
+		t.Run(string(kind), func(t *testing.T) {
+			t.Parallel()
+			test := newFleet(t, 1, 1)
+			input := engine.ApplyInput{
+				Observation: test.observe(t), MayAdvance: false,
+				Operation: engine.Operation{ID: "expired", Action: engine.Action{Kind: kind, Participants: ids("dp0@id0")}},
+			}
+			if report, err := test.eng.Apply(t.Context(), input); err != nil || report.State != engine.Running {
+				t.Fatalf("read-only Apply: %+v, %v", report, err)
+			}
+			if len(test.ranks[0].applied) != 0 || test.ranks[0].prompts != 0 {
+				t.Fatal("read-only Apply performed an effect")
+			}
+		})
+	}
+}
+
+func TestApplyDoesNotResendWithoutRequestEvidence(t *testing.T) {
+	t.Parallel()
+	test := newFleet(t, 1, 1)
+	test.ranks[0].unhealthy()
+	input := engine.ApplyInput{
+		Observation: test.observe(t), MayAdvance: true,
+		Operation: operation(&engine.Reconfig{ID: "saved-before-crash", Participants: ids("dp0@id0")}, true),
+	}
+	if report, err := test.eng.Apply(t.Context(), input); err != nil || report.State != engine.Running {
+		t.Fatalf("unknown submission: %+v, %v", report, err)
+	}
+	if len(test.ranks[0].applied) != 0 {
+		t.Fatal("resent a request whose prior effects cannot be established")
 	}
 }

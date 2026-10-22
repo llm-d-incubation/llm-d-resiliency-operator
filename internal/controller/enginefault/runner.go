@@ -29,15 +29,11 @@ func (*Runner) NeedLeaderElection() bool { return true }
 func (runner *Runner) Start(ctx context.Context) error {
 	ticker := time.NewTicker(runner.Config.PollInterval)
 	defer ticker.Stop()
-	store := runner.Journal
-	if runner.Config.DryRun {
-		store = &memJournal{}
-	}
 	var current Controller
 	for {
 		// Returning an error would stop the manager and every controller in it.
 		if current == nil {
-			loaded, err := New(ctx, runner.Workload, runner.Engine, store, runner.Recorder, runner.Config)
+			loaded, err := New(ctx, runner.Workload, runner.Engine, runner.Journal, runner.Recorder, runner.Config)
 			if err != nil && ctx.Err() == nil {
 				ctrl.LoggerFrom(ctx).Error(err, "load engine fault journal")
 			}
@@ -56,15 +52,4 @@ func (runner *Runner) Start(ctx context.Context) error {
 		case <-ticker.C:
 		}
 	}
-}
-
-// memJournal keeps a dry run's record in memory, so it never writes the real journal.
-type memJournal struct{ data []byte }
-
-//nolint:gocritic // The contract returns the record, its version and an error.
-func (store *memJournal) Load(context.Context) ([]byte, string, error) { return store.data, "", nil }
-
-func (store *memJournal) Save(_ context.Context, data []byte, _ string) (string, error) {
-	store.data = data
-	return "", nil
 }

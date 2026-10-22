@@ -22,33 +22,31 @@ import (
 )
 
 type controller struct {
-	wl       workload.Workload
-	eng      engine.Engine
-	store    journal.Journal
-	recorder Recorder
-	config   Config
-	now      func() time.Time
-	saved    []byte
-	version  string
-	pending  []func()
-	// callErr collects workload errors that do not stop the step: the call is repeated next poll.
-	callErr error
-	// waited restarts the deadlines on the first poll after a wait for the workload, or after a load.
-	waited bool
-	// wouldDo is the action this step skipped in a dry run.
-	wouldDo string
+	wl             workload.Workload
+	eng            engine.Engine
+	store          journal.Journal
+	recorder       Recorder
+	config         Config
+	now            func() time.Time
+	saved          []byte
+	version        string
+	pending        []func()
+	lastStepFailed bool
+	wouldDo        string
 }
 
 type view struct {
-	group      *workload.Group
-	obs        engine.Observation
-	admitted   []engine.MemberID
-	candidates []engine.MemberID
-	members    map[engine.MemberID]*engine.Member
-	unknown    []engine.MemberID
-	read       int
+	group               *workload.Group
+	obs                 engine.Observation
+	admitted            []engine.MemberID
+	candidates          []engine.MemberID
+	members             map[engine.MemberID]*engine.Member
+	unknown             []engine.MemberID
+	read                int
+	observationTimedOut bool
 }
 
+//nolint:gocritic // Configuration is copied into each controller.
 func New(ctx context.Context, wl workload.Workload, eng engine.Engine, store journal.Journal,
 	recorder Recorder, config Config,
 ) (Controller, error) {
@@ -59,6 +57,7 @@ func New(ctx context.Context, wl workload.Workload, eng engine.Engine, store jou
 	return fsm, nil
 }
 
+//nolint:gocritic // Configuration is copied into each controller.
 func load(ctx context.Context, wl workload.Workload, eng engine.Engine, store journal.Journal,
 	recorder Recorder, config Config, now func() time.Time,
 ) (*controller, error) {
@@ -66,37 +65,65 @@ func load(ctx context.Context, wl workload.Workload, eng engine.Engine, store jo
 	if err != nil {
 		return nil, err
 	}
-	var record Record
-	if len(data) > 0 {
-		if err := json.Unmarshal(data, &record); err != nil {
-			return nil, fmt.Errorf("invalid journal record: %w", err)
-		}
+	record, err := decodeRecord(data, now().UTC())
+	if err != nil {
+		return nil, err
 	}
-	if !slices.Contains([]Phase{Starting, Serving, Recovering}, record.Phase) {
-		record = Record{Phase: Starting, Since: now().UTC(), Reason: "new group"}
-	}
+
+	record.Budget.StableSince = time.Time{}
 	saved, err := json.Marshal(&record)
 	if err != nil {
 		return nil, err
 	}
-	if len(data) == 0 {
-		saved = nil
-	}
 	return &controller{
 		wl: wl, eng: eng, store: store, recorder: recorder, config: config, now: now, saved: saved, version: version,
-		waited: true,
 	}, nil
 }
 
+func decodeRecord(data []byte, now time.Time) (Record, error) {
+	if len(data) == 0 {
+		return Record{Version: 2, Phase: Starting, Since: now, Epoch: now, Reason: "new group"}, nil
+	}
+	var record Record
+	if err := json.Unmarshal(data, &record); err != nil {
+		return Record{}, fmt.Errorf("invalid journal record: %w", err)
+	}
+	if record.Version != 2 {
+		return Record{}, fmt.Errorf("unsupported journal version %d; refusing to discard recovery state", record.Version)
+	}
+	if !slices.Contains([]Phase{Starting, Serving, Recovering}, record.Phase) || record.Epoch.IsZero() {
+		return Record{}, errors.New("invalid journal phase or epoch")
+	}
+	if record.Operation != nil && (record.Operation.ID == "" || record.OperationSince.IsZero()) {
+		return Record{}, errors.New("invalid saved operation identity or start time")
+	}
+	if record.Workload != nil && (record.Operation == nil || !externalAction(record.Operation.Action.Kind)) {
+		return Record{}, errors.New("workload action has no matching engine requirement")
+	}
+	if record.Operation == nil && (record.OperationBlocked != "" || !record.OperationSince.IsZero()) {
+		return Record{}, errors.New("operation state has no saved operation")
+	}
+	budget := record.Budget
+	if budget.Actions < 0 ||
+		budget.Started.IsZero() && (budget.Actions != 0 || !budget.StableSince.IsZero() || budget.Blocked != "") ||
+		!budget.StableSince.IsZero() && budget.StableSince.Before(budget.Started) {
+		return Record{}, errors.New("invalid recovery budget")
+	}
+	return record, nil
+}
+
 func (fsm *controller) Step(ctx context.Context) error {
-	fsm.pending, fsm.callErr, fsm.wouldDo = nil, nil, ""
+	fsm.pending, fsm.wouldDo = nil, ""
 	next := fsm.record()
+	if fsm.lastStepFailed {
+		fsm.interruptStability(&next)
+	}
 	err := fsm.step(ctx, &next)
 	if err == nil {
 		next.WouldDo = fsm.wouldDo
 		err = fsm.save(ctx, &next)
 	}
-	err = errors.Join(err, fsm.callErr)
+	fsm.lastStepFailed = err != nil
 	current := fsm.record()
 	fsm.recorder.Stepped(&current, err)
 	return err
@@ -104,9 +131,6 @@ func (fsm *controller) Step(ctx context.Context) error {
 
 func (fsm *controller) record() Record {
 	var record Record
-	if len(fsm.saved) == 0 {
-		return Record{Phase: Starting, Since: fsm.now().UTC(), Reason: "new group"}
-	}
 	if err := json.Unmarshal(fsm.saved, &record); err != nil {
 		panic(err)
 	}
@@ -118,13 +142,16 @@ func (fsm *controller) save(ctx context.Context, next *Record) error {
 	if err != nil {
 		return err
 	}
-	if !bytes.Equal(data, fsm.saved) {
-		version, err := fsm.store.Save(ctx, data, fsm.version)
+	changed, version := !bytes.Equal(data, fsm.saved), fsm.version
+	if changed && !fsm.config.DryRun {
+		version, err = fsm.store.Save(ctx, data, fsm.version)
 		if err != nil {
 			fsm.pending = nil
 			fsm.recorder.SaveFailed(err)
 			return fmt.Errorf("save journal: %w", err)
 		}
+	}
+	if changed {
 		previous := fsm.record()
 		fsm.saved, fsm.version = data, version
 		if previous.Phase != next.Phase {
@@ -143,130 +170,62 @@ func (fsm *controller) save(ctx context.Context, next *Record) error {
 
 func (fsm *controller) later(emit func()) { fsm.pending = append(fsm.pending, emit) }
 
-func (fsm *controller) called(err error) { fsm.callErr = errors.Join(fsm.callErr, err) }
-
-// would keeps the action in a dry run, and tells the caller to skip it.
-func (fsm *controller) would(action string) bool {
-	if fsm.config.DryRun {
-		fsm.wouldDo = action
-	}
-	return fsm.config.DryRun
-}
-
 func (fsm *controller) step(ctx context.Context, next *Record) error {
 	now := fsm.now().UTC()
 	group, err := fsm.wl.Discover(ctx)
 	if err != nil {
 		return fsm.unseen(ctx, next, now, true, fmt.Errorf("discover: %w", err))
 	}
-	if next.UnseenByDiscover {
-		resume(next, now)
-	}
 	next.RecreateStopped = group.RecreateStopped
-	if waiting, err := fsm.waitForWorkload(ctx, next, &group, now); waiting || err != nil {
-		return err
+	if next.Operation != nil && next.Workload != nil {
+		return fsm.watchPods(ctx, next, &group, now)
 	}
-	if next.Phase != Starting && !sameGroup(next, &group) {
-		fsm.startOver(next, "new group", now)
+	if group.Recreating || group.RecreateStopped {
+		fsm.interruptStability(next)
 		return nil
 	}
-	if next.Phase == Starting {
+	if next.Phase != Starting && !sameGroup(next, &group) {
+		if fsm.config.DryRun && next.Operation != nil {
+			fsm.wouldDo = describeAction(&next.Operation.Action, nil)
+			return nil
+		}
+		fsm.startOver(next, "new group", now)
+	}
+	if next.Phase == Starting && next.Operation == nil {
 		return fsm.start(ctx, next, &group, now)
 	}
-	if next.Pods == nil {
-		next.Pods = map[string]PodRecord{}
-	}
-	fsm.comparePods(ctx, next, &group)
+	fsm.comparePods(next, &group)
 	current := fsm.connect(ctx, next, &group)
 	if len(current.unknown) > 0 && current.read == 0 {
-		if since := next.UnseenSince; !since.IsZero() && fsm.config.UnseenTimeout > 0 && now.Sub(since) >= fsm.config.UnseenTimeout {
-			return fsm.resetAll(ctx, next, ResetUnseen, "no admitted member could be read since "+since.Format(time.RFC3339), now)
+		if next.UnseenSince.IsZero() {
+			next.UnseenSince = now
 		}
-		return fsm.unseen(ctx, next, now, false, errors.New("observe: no admitted member could be read"))
+		if fsm.config.UnseenTimeout <= 0 || now.Sub(next.UnseenSince) < fsm.config.UnseenTimeout {
+			return fsm.unseen(ctx, next, now, false, errors.New("observe: no admitted member could be read"))
+		}
+		current.observationTimedOut = true
+	} else {
+		next.UnseenSince, next.UnseenByDiscover = time.Time{}, false
 	}
-	resume(next, now)
 	if reason := violation(next, current); reason != "" {
-		return fsm.resetAll(ctx, next, ResetExclusionBroken, reason, now)
+		next.Unsafe = reason
 	}
-	switch {
-	case next.Reconfig != nil:
-		return fsm.watch(ctx, next, current, now)
-	case next.Phase == Serving:
-		return fsm.serve(ctx, next, current, now)
+	if next.Operation != nil {
+		return fsm.execute(ctx, next, current, now)
 	}
-	return fsm.recover(ctx, next, current, now)
+	return fsm.decide(ctx, next, current, now)
 }
 
 func (fsm *controller) unseen(ctx context.Context, next *Record, now time.Time, byDiscover bool, err error) error {
-	changed := next.UnseenSince.IsZero() || byDiscover && !next.UnseenByDiscover
+	fsm.interruptStability(next)
 	if next.UnseenSince.IsZero() {
 		next.UnseenSince = now
 	}
 	next.UnseenByDiscover = next.UnseenByDiscover || byDiscover
-	if changed {
-		if saveErr := fsm.save(ctx, next); saveErr != nil {
-			return saveErr
-		}
+	if saveErr := fsm.save(ctx, next); saveErr != nil {
+		return saveErr
 	}
 	return err
-}
-
-func resume(next *Record, now time.Time) {
-	if next.UnseenSince.IsZero() {
-		return
-	}
-	gap := now.Sub(next.UnseenSince)
-	if next.Phase == Recovering {
-		next.Since = next.Since.Add(gap)
-	}
-	if next.Reconfig != nil {
-		next.ReconfigSince = next.ReconfigSince.Add(gap)
-	}
-	if !next.VerifyFailedSince.IsZero() {
-		next.VerifyFailedSince = next.VerifyFailedSince.Add(gap)
-	}
-	next.UnseenSince, next.UnseenByDiscover = time.Time{}, false
-}
-
-func (fsm *controller) waitForWorkload(ctx context.Context, next *Record, group *workload.Group, now time.Time) (bool, error) {
-	owed := len(next.Pods) > 0
-	present := false
-	for uid, pod := range next.Pods {
-		owed = owed && pod.Removing
-		present = present || find(group, uid) != nil
-	}
-	owed = owed && present
-	if !group.Recreating && !group.RecreateStopped && !owed {
-		if !fsm.waited {
-			return false, nil
-		}
-		resume(next, now)
-		if next.Phase == Recovering {
-			next.Since = now
-		}
-		if next.Reconfig != nil {
-			next.ReconfigSince = now
-		}
-		if err := fsm.save(ctx, next); err != nil {
-			return true, err
-		}
-		fsm.waited = false
-		return false, nil
-	}
-	fsm.waited = true
-	resume(next, now)
-	if (group.Recreating || group.RecreateStopped) && next.Phase == Serving && next.Incident == nil {
-		cause := "workload is recreating the group"
-		if group.RecreateStopped {
-			cause = "workload stopped recreating the group"
-		}
-		fsm.openIncident(next, cause, nil, now)
-	}
-	if err := fsm.save(ctx, next); err != nil || !owed || fsm.would("reset all") {
-		return true, err
-	}
-	fsm.called(fsm.wl.ResetAll(ctx, refs(next)))
-	return true, nil
 }
 
 func sameGroup(next *Record, group *workload.Group) bool {
@@ -279,11 +238,15 @@ func sameGroup(next *Record, group *workload.Group) bool {
 }
 
 func (fsm *controller) startOver(next *Record, reason string, now time.Time) {
-	if next.Reconfig != nil {
-		fsm.finishReconfig(next, &engine.Progress{State: engine.Running, Reason: reason}, now)
+	if next.Operation != nil {
+		fsm.finish(next, engine.Failed, engine.Group, reason, now)
 	}
 	fsm.closeIncident(next, Recreated, now)
-	*next = Record{Phase: Starting, Since: now, Reason: reason, RecreateStopped: next.RecreateStopped}
+	epoch, state, result, budget := next.Epoch, next.PolicyState, next.Result, next.Budget
+	budget.StableSince = time.Time{}
+	*next = Record{
+		Version: 2, Phase: Starting, Since: now, Reason: reason, Epoch: epoch, PolicyState: state, Result: result, Budget: budget,
+	}
 }
 
 func (fsm *controller) start(ctx context.Context, next *Record, group *workload.Group, now time.Time) error {
@@ -308,42 +271,39 @@ func (fsm *controller) start(ctx context.Context, next *Record, group *workload.
 	var reported, live []engine.MemberID
 	for index := range obs.Members {
 		member := &obs.Members[index]
+		if member.Replaces != "" && !member.Serving {
+			continue
+		}
 		reported = append(reported, member.ID())
 		if !member.Terminal {
 			live = append(live, member.ID())
 		}
 	}
 	slices.Sort(live)
-	plan := fsm.eng.Plan(obs, live, nil)
-	if plan.Kind != engine.Healthy {
-		return nil
-	}
 	next.Members = map[engine.MemberID]MemberState{}
 	for _, id := range reported {
 		next.Members[id] = Admitted
 	}
-	enter(next, Serving, plan.Reason, now)
-	return nil
+	current := &view{group: group, obs: obs, admitted: live, members: map[engine.MemberID]*engine.Member{}}
+	for index := range obs.Members {
+		member := &obs.Members[index]
+		current.members[member.ID()] = member
+	}
+	return fsm.decide(ctx, next, current, now)
 }
 
-func (fsm *controller) comparePods(ctx context.Context, next *Record, group *workload.Group) {
-	var owed []workload.PodRef
+func (fsm *controller) comparePods(next *Record, group *workload.Group) {
 	for _, uid := range slices.Sorted(maps.Keys(next.Pods)) {
 		saved, pod := next.Pods[uid], find(group, uid)
 		switch {
 		case saved.Removing && pod == nil:
 			forget(next, uid)
-		case saved.Removing && pod.State != workload.PodTerminating:
-			owed = append(owed, podRef(uid, &saved))
 		case saved.Removing:
 		case pod == nil && !tracks(next, saved.Identity):
 			delete(next.Pods, uid)
 		case pod != nil && pod.Identity != saved.Identity && !tracks(next, saved.Identity):
 			next.Pods[uid] = PodRecord{Name: pod.Name, Identity: pod.Identity, Node: pod.Node}
 		}
-	}
-	if len(owed) > 0 {
-		fsm.remove(ctx, next, owed, false)
 	}
 	for index := range group.Pods {
 		pod := &group.Pods[index]
@@ -375,7 +335,7 @@ func (fsm *controller) connect(ctx context.Context, next *Record, group *workloa
 			member.Terminal, member.Serving, member.Unknown = true, false, false
 		case tracked && state == Candidate && member.Terminal:
 			next.Members[id] = Rejected
-		case !tracked && joinable(next, group, member):
+		case !tracked && joinable(next, group, member) && replacementAllowed(next, member):
 			next.Members[id] = Candidate
 		}
 		current.members[id] = member
@@ -421,6 +381,15 @@ func joinable(next *Record, group *workload.Group, member *engine.Member) bool {
 		pod.State == workload.PodReady && pod.Identity == member.PodIdentity
 }
 
+func replacementAllowed(next *Record, member *engine.Member) bool {
+	if member.Replaces == "" {
+		return true
+	}
+	uid, _, found := podOf(next, member.Replaces)
+	return found && uid == member.Pod.UID && member.ID() != member.Replaces &&
+		next.Members[member.Replaces] == Excluded
+}
+
 func isLost(next *Record, group *workload.Group, id engine.MemberID) bool {
 	uid, saved, ok := podOf(next, id)
 	if !ok {
@@ -456,71 +425,115 @@ func violation(next *Record, current *view) string {
 		switch {
 		case state == Excluded && !member.Terminal:
 			return fmt.Sprintf("C4: excluded member %s is not terminal", id)
-		case state != Admitted && member.Serving && (next.Reconfig == nil || !slices.Contains(next.Reconfig.Add, id)):
+		case state != Admitted && member.Serving && (next.Operation == nil || !slices.Contains(next.Operation.Action.Add, id)):
 			return fmt.Sprintf("C5: member %s serves before it is admitted", id)
-		case next.Reconfig != nil && slices.Contains(next.Reconfig.Remove, id) && !member.Terminal:
+		case next.Operation != nil && slices.Contains(next.Operation.Action.Remove, id) && !member.Terminal:
 			return fmt.Sprintf("C1: member %s left the reconfig but is not terminal", id)
 		}
 	}
 	return ""
 }
 
-func (fsm *controller) serve(ctx context.Context, next *Record, current *view, now time.Time) error {
-	plan := fsm.eng.Plan(current.obs, current.admitted, current.candidates)
-	grow := plan.Kind == engine.Change && len(plan.Remove) == 0 && len(plan.Add) > 0
-	if len(current.unknown) > 0 && (plan.Kind == engine.Healthy || grow) {
-		plan, grow = engine.Plan{Kind: engine.Wait, Reason: "cannot read " + joined(current.unknown)}, false
+func (fsm *controller) decide(ctx context.Context, next *Record, current *view, now time.Time) error {
+	unhealthy := current.pick(func(member *engine.Member) bool { return member == nil || !member.Serving || member.Unknown })
+	if len(unhealthy) > 0 {
+		fsm.beginRecovery(next, now)
 	}
-	switch {
-	case plan.Kind != engine.Healthy && !grow:
-		return fsm.enterRecovering(ctx, next, current, &plan, now)
-	case len(next.Verifying) > 0:
-		return fsm.verify(ctx, next, current, now)
-	case grow:
-		return fsm.send(ctx, next, current, &plan, now)
+	budget := fsm.budgetInput(next, now)
+	if err := fsm.save(ctx, next); err != nil {
+		return err
 	}
-	fsm.closeIncident(next, outcome(next.Incident), now)
-	return fsm.restore(ctx, next, current, now)
-}
-
-func (fsm *controller) enterRecovering(ctx context.Context, next *Record, current *view, plan *engine.Plan, now time.Time) error {
-	enter(next, Recovering, plan.Reason, now)
-	if next.Incident == nil {
-		fsm.openIncident(next, plan.Reason, current, now)
+	input := engine.DecisionInput{
+		Observation: current.obs, ObservationTimedOut: current.observationTimedOut,
+		Admitted: current.admitted, Candidates: current.candidates,
+		State: slices.Clone(next.PolicyState), LastResult: next.Result, Starting: next.Phase == Starting,
+		Fault: next.Unsafe, Elapsed: now.Sub(next.Epoch), Budget: budget,
+		DiagnosisTimeout: fsm.config.DiagnosisTimeout, VerifyTimeout: fsm.config.VerifyTimeout, FlapWindow: fsm.config.FlapWindow,
+	}
+	for _, id := range slices.Sorted(maps.Keys(next.Members)) {
+		switch next.Members[id] {
+		case Excluded:
+			input.Excluded = append(input.Excluded, id)
+		case Rejected:
+			input.Rejected = append(input.Rejected, id)
+		}
+	}
+	action := fsm.eng.Decide(input)
+	if reason := checkAction(next, current, &action); reason != "" {
+		return fmt.Errorf("invalid engine action: %s", reason)
+	}
+	if len(action.Add) > 0 && !fsm.eng.Capabilities().Grow {
+		return errors.New("engine cannot admit replacements")
+	}
+	next.Reason = action.Reason
+	if next.Phase != Starting && len(unhealthy) > 0 {
+		enter(next, Recovering, action.Reason, now)
+		if next.Incident == nil {
+			fsm.openIncident(next, action.Reason, current, now)
+		}
+	}
+	if action.Kind == engine.Healthy || action.Kind == engine.Wait {
+		if action.State != nil {
+			next.PolicyState = slices.Clone(action.State)
+		}
+		if action.Kind == engine.Healthy {
+			enter(next, Serving, action.Reason, now)
+			fsm.closeIncident(next, outcome(next.Incident), now)
+			fsm.stableRecovery(next, current, now)
+		} else {
+			fsm.interruptStability(next)
+		}
+		if next.Budget.Blocked != "" {
+			next.Reason = next.Budget.Blocked
+		}
+		return nil
+	}
+	fsm.interruptStability(next)
+	var selected *WorkloadAction
+	var result engine.Report
+	if externalAction(action.Kind) {
+		selected, result = fsm.selectWorkload(next, current, &action)
+	}
+	mutating := action.Kind == engine.Change || action.Kind == engine.Probe || selected != nil
+	if fsm.config.DryRun {
+		if mutating && budget.Blocked != "" {
+			next.Reason = budget.Blocked
+			return nil
+		}
+		fsm.wouldDo = describeAction(&action, selected)
+		return nil
+	}
+	if mutating && !fsm.authorizeAction(next, now) {
+		next.Reason = next.Budget.Blocked
+		return nil
+	}
+	if action.State != nil {
+		next.PolicyState = slices.Clone(action.State)
+	}
+	if inc := next.Incident; inc != nil && (action.Kind == engine.Change || selected != nil && selected.Kind == RestoreResetAll) {
+		if len(inc.Reconfigs) == 0 && inc.Durations.Diagnose == 0 {
+			inc.Durations.Diagnose = now.Sub(inc.Opened)
+		}
+		affect(next, inc, action.Remove)
+	}
+	action.State = nil
+	next.Operation = &engine.Operation{ID: newID("iro-ft-", 16), Action: action}
+	next.OperationSince, next.Workload = now, selected
+	if selected != nil {
+		for _, target := range selected.Pods {
+			pod := next.Pods[target.UID]
+			pod.Removing = true
+			next.Pods[target.UID] = pod
+		}
 	}
 	if err := fsm.save(ctx, next); err != nil {
 		return err
 	}
-	if fsm.config.DryRun {
+	if externalAction(action.Kind) && selected == nil {
+		fsm.finish(next, result.State, result.Scope, result.Reason, now)
 		return nil
 	}
-	if err := fsm.eng.Probe(ctx, current.obs); err != nil {
-		next.Reason += ": " + err.Error()
-	}
-	return nil
-}
-
-func (fsm *controller) recover(ctx context.Context, next *Record, current *view, now time.Time) error {
-	plan := fsm.eng.Plan(current.obs, current.admitted, current.candidates)
-	if plan.Kind == engine.Healthy && len(current.unknown) > 0 {
-		plan = engine.Plan{Kind: engine.Wait, Reason: "cannot read " + joined(current.unknown)}
-	}
-	switch {
-	case plan.Kind == engine.Healthy:
-		enter(next, Serving, plan.Reason, now)
-		if len(next.Verifying) == 0 {
-			fsm.closeIncident(next, outcome(next.Incident), now)
-		}
-		return nil
-	case plan.Kind == engine.Unrecoverable:
-		return fsm.resetAll(ctx, next, ResetUnrecoverable, plan.Reason, now)
-	// A dry run never sends the reconfig, so it stays in diagnosis; a real run would have left it already.
-	case now.Sub(next.Since) > fsm.config.DiagnosisTimeout && (!fsm.config.DryRun || plan.Kind != engine.Change):
-		return fsm.resetAll(ctx, next, ResetDiagnosisDeadline, plan.Reason, now)
-	case plan.Kind != engine.Change || now.Sub(next.Since) < 2*fsm.config.PollInterval:
-		return nil
-	}
-	return fsm.send(ctx, next, current, &plan, now)
+	return fsm.execute(ctx, next, current, now)
 }
 
 func enter(next *Record, phase Phase, reason string, now time.Time) {

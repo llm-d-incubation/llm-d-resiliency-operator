@@ -4,14 +4,152 @@
 package vllm
 
 import (
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/llm-d/llm-d-resiliency-operator/internal/engine"
 )
 
-func (*Engine) Plan(observation engine.Observation, admitted, _ []engine.MemberID) engine.Plan {
+type recoveryState struct {
+	Stage             string            `json:"stage,omitempty"`
+	ResultID          string            `json:"resultID,omitempty"`
+	DiagnosisSince    time.Duration     `json:"diagnosisSince,omitempty"`
+	VerifyFailed      bool              `json:"verifyFailed,omitempty"`
+	VerifyFailedSince time.Duration     `json:"verifyFailedSince,omitempty"`
+	LastRetry         *time.Duration    `json:"lastRetry,omitempty"`
+	Replacements      []engine.MemberID `json:"replacements,omitempty"`
+	Verified          []engine.MemberID `json:"verified,omitempty"`
+}
+
+//nolint:gocritic // The policy contract passes DecisionInput by value.
+func (*Engine) Decide(input engine.DecisionInput) engine.Action {
+	var state recoveryState
+	if len(input.State) > 0 {
+		if err := json.Unmarshal(input.State, &state); err != nil {
+			return engine.Action{
+				Kind: engine.RecreateGroup, State: json.RawMessage(`{}`), Reason: "invalid vLLM recovery state: " + err.Error(),
+			}
+		}
+	}
+	plan := nextAction(&input, &state)
+	data, err := json.Marshal(state)
+	if err != nil {
+		return engine.Action{Kind: engine.RecreateGroup, Reason: "encode vLLM recovery state: " + err.Error()}
+	}
+	plan.State = data
+	return plan
+}
+
+func nextAction(input *engine.DecisionInput, state *recoveryState) engine.Action {
+	if input.Fault != "" {
+		return recreateAction(input.Fault)
+	}
+	if input.ObservationTimedOut {
+		return recreateAction("no admitted rank could be read before the observation deadline")
+	}
+	if plan := consumeResult(input, state); plan != nil {
+		return *plan
+	}
+	plan := membershipAction(input.Observation, input.Admitted)
+	if state.Stage == "verifying" {
+		if state.VerifyFailed && input.Elapsed-state.VerifyFailedSince >= input.VerifyTimeout {
+			return recreateAction("vLLM verification deadline exceeded")
+		}
+		return engine.Action{Kind: engine.Verify, Participants: input.Admitted, Reason: "verify admitted ranks"}
+	}
+	if len(input.Admitted) == 0 {
+		if input.Starting {
+			return engine.Action{Kind: engine.Wait, Reason: "waiting for ranks to start"}
+		}
+		return recreateAction("no admitted ranks")
+	}
+	if plan.Kind == engine.Healthy {
+		if input.Starting && (state.Stage != "serving" || !slices.Equal(state.Verified, input.Admitted)) {
+			state.Stage = "verifying"
+			return engine.Action{Kind: engine.Verify, Participants: input.Admitted, Reason: "verify starting ranks"}
+		}
+		state.Stage = "serving"
+		return replacementAction(input, state, &plan)
+	}
+	if plan.Kind == engine.RecreateGroup {
+		return plan
+	}
+	if state.Stage != "diagnosing" {
+		state.Stage, state.DiagnosisSince = "diagnosing", input.Elapsed
+		return engine.Action{Kind: engine.Probe, Reason: plan.Reason}
+	}
+	if input.Elapsed-state.DiagnosisSince >= input.DiagnosisTimeout {
+		return recreateAction("vLLM diagnosis deadline exceeded: " + plan.Reason)
+	}
+	if input.Starting {
+		return engine.Action{Kind: engine.Wait, Reason: "waiting for ranks to start: " + plan.Reason}
+	}
+	if plan.Kind == engine.Change && len(plan.Remove) == 0 {
+		if state.LastRetry != nil && input.Elapsed-*state.LastRetry < input.FlapWindow {
+			return recreateAction("vLLM ranks faulted again within the retry window")
+		}
+		elapsed := input.Elapsed
+		state.LastRetry = &elapsed
+	}
+	return plan
+}
+
+func consumeResult(input *engine.DecisionInput, state *recoveryState) *engine.Action {
+	result := input.LastResult
+	if result == nil || result.Operation.ID == state.ResultID {
+		return nil
+	}
+	state.ResultID = result.Operation.ID
+	switch result.Operation.Action.Kind {
+	case engine.Change:
+		if result.State != engine.Succeeded {
+			plan := recreateAction("vLLM reconfiguration failed: " + result.Reason)
+			return &plan
+		}
+		state.Stage, state.VerifyFailed, state.Verified = "verifying", false, nil
+	case engine.Verify:
+		if result.State == engine.Succeeded {
+			state.Stage, state.VerifyFailed = "serving", false
+			state.Verified = slices.Clone(result.Operation.Action.Participants)
+		} else {
+			state.Stage = "verifying"
+			if !state.VerifyFailed {
+				state.VerifyFailed, state.VerifyFailedSince = true, input.Elapsed
+			}
+		}
+	case engine.ReplaceMembers:
+		state.Replacements = append(state.Replacements, result.Operation.Action.Members...)
+	case engine.RecreateGroup:
+		if result.State != engine.Succeeded {
+			plan := recreateAction("vLLM group reset failed: " + result.Reason)
+			return &plan
+		}
+		*state = recoveryState{ResultID: result.Operation.ID}
+	}
+	return nil
+}
+
+func replacementAction(input *engine.DecisionInput, state *recoveryState, healthy *engine.Action) engine.Action {
+	action := engine.Action{Kind: engine.ReplaceMembers, Reason: "replacement resources needed for excluded ranks"}
+	for _, id := range slices.Concat(input.Excluded, input.Rejected) {
+		if !slices.Contains(state.Replacements, id) {
+			action.Members = append(action.Members, id)
+		}
+	}
+	if len(action.Members) > 0 {
+		return action
+	}
+	return *healthy
+}
+
+func recreateAction(reason string) engine.Action {
+	return engine.Action{Kind: engine.RecreateGroup, Reason: reason}
+}
+
+func membershipAction(observation engine.Observation, admitted []engine.MemberID) engine.Action {
 	members := membersOf(observation)
 	found := ranksOf(observation)
 	var survivors, dead, healthy, waiting []engine.MemberID
@@ -34,58 +172,24 @@ func (*Engine) Plan(observation engine.Observation, admitted, _ []engine.MemberI
 	}
 	switch {
 	case len(healthy) == len(admitted):
-		return engine.Plan{Kind: engine.Healthy, Reason: fmt.Sprintf("%d ranks healthy", len(healthy))}
+		return engine.Action{Kind: engine.Healthy, Reason: fmt.Sprintf("%d ranks healthy", len(healthy))}
 	case len(survivors) == 0 && len(waiting) == 0:
-		return engine.Plan{Kind: engine.Unrecoverable, Reason: "no rank survives: " + list(dead)}
+		return engine.Action{Kind: engine.RecreateGroup, Reason: "no rank survives: " + list(dead)}
 	case len(waiting) > 0:
-		return engine.Plan{Kind: engine.Wait, Reason: "waiting for " + describe(members, waiting)}
+		return engine.Action{Kind: engine.Wait, Reason: "waiting for " + describe(members, waiting)}
 	case len(healthy) > 0:
 		faulted := slices.DeleteFunc(slices.Concat(dead, survivors), func(id engine.MemberID) bool {
 			return slices.Contains(healthy, id)
 		})
-		return engine.Plan{
+		return engine.Action{
 			Kind: engine.Wait, Reason: describe(members, faulted) + "; waiting for " + list(healthy) + " to detect it",
 		}
 	case len(dead) > 0:
-		return engine.Plan{
+		return engine.Action{
 			Kind: engine.Change, Participants: survivors, Remove: dead, Reason: "remove dead " + describe(members, dead),
 		}
 	}
-	return engine.Plan{Kind: engine.Change, Participants: survivors, Reason: "retry " + describe(members, survivors)}
-}
-
-//nolint:gocritic // The interface passes the reconfig by value.
-func (*Engine) Progress(observation engine.Observation, reconfig engine.Reconfig) engine.Progress {
-	members := membersOf(observation)
-	found := ranksOf(observation)
-	done := 0
-	for _, id := range reconfig.Participants {
-		member, r := members[id], found[id]
-		switch {
-		case member != nil && member.Terminal:
-			return failed(fmt.Sprintf("%s died during the reconfig: %s", id, member.Detail))
-		case member == nil || r == nil || !r.Reached:
-		case r.RequestID == "" && (r.Status == "unhealthy" || r.Status == "diagnosing"):
-			// The status keeps the reconfig's request ID only until the engine reports a new state, so a
-			// fault without it came after the reconfig ended, or the reconfig never arrived.
-			return failed(fmt.Sprintf("%s is faulted without a reconfig ID: it faulted again after the reconfig, "+
-				"or never got it: %s", id, member.Detail))
-		case r.FTState == "failed" && r.RequestID == reconfig.ID:
-			return failed(fmt.Sprintf("%s failed the reconfig: %s", id, r.FTError))
-		case r.FTState == "recovering" && r.RequestID != reconfig.ID:
-			return failed(fmt.Sprintf("%s runs request %s instead", id, r.RequestID))
-		case member.Serving:
-			done++
-		}
-	}
-	if done == len(reconfig.Participants) {
-		return engine.Progress{State: engine.Succeeded, Reason: fmt.Sprintf("%d ranks healthy", done)}
-	}
-	return engine.Progress{State: engine.Running, Reason: fmt.Sprintf("%d of %d ranks healthy", done, len(reconfig.Participants))}
-}
-
-func failed(reason string) engine.Progress {
-	return engine.Progress{State: engine.Failed, Scope: engine.Group, Reason: reason}
+	return engine.Action{Kind: engine.Change, Participants: survivors, Reason: "retry " + describe(members, survivors)}
 }
 
 func membersOf(observation engine.Observation) map[engine.MemberID]*engine.Member {
