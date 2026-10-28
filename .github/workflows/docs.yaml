@@ -1,5 +1,6 @@
 name: Docs
 
+# Builds the site. Docs deploy (docs-deploy.yaml) publishes it: main at the root, a PR under pr-preview/pr-<number>.
 on:
   push:
     branches: [main]
@@ -31,21 +32,14 @@ jobs:
           cache-dependency-path: website/package-lock.json
       - run: npm ci
       - run: npm run build
-      - uses: actions/upload-pages-artifact@v5
-        if: github.event_name != 'pull_request'
+        env:
+          DOCS_BASE_URL: ${{ github.event_name == 'pull_request' && format('/llm-d-resiliency-operator/pr-preview/pr-{0}/', github.event.number) || '' }}
+      - if: github.event_name == 'pull_request'
+        run: echo "$NUMBER" > build/pr-number
+        env:
+          NUMBER: ${{ github.event.number }}
+      - uses: actions/upload-artifact@v7
         with:
+          name: docs-site
           path: website/build
-
-  deploy:
-    if: github.event_name != 'pull_request'
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
-    steps:
-      - id: deploy
-        uses: actions/deploy-pages@v5
+          retention-days: 7
