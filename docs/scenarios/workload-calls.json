@@ -56,7 +56,7 @@
       "calls": [
         {
           "to": "workload",
-          "call": "Reset([pod-3 d1])",
+          "call": "Reset([pod-3 (UID d1)])",
           "out": "nil"
         },
         {
@@ -78,7 +78,7 @@
       "calls": [
         {
           "to": "workload",
-          "call": "Reset([pod-3 d1])",
+          "call": "Reset([pod-3 (UID d1)])",
           "out": "nil, nothing changed"
         }
       ]
@@ -95,7 +95,7 @@
       "calls": [
         {
           "to": "workload",
-          "call": "Release([pod-3 d2])",
+          "call": "Release([pod-3 (UID d2)])",
           "out": "nil"
         }
       ]
@@ -125,7 +125,7 @@
       "calls": [
         {
           "to": "workload",
-          "call": "ResetAll([pod-0 a1, pod-1 b1, pod-2 c1])",
+          "call": "ResetAll([pod-0 (UID a1), pod-1 (UID b1), pod-2 (UID c1)])",
           "out": "nil"
         },
         {
@@ -142,7 +142,7 @@
       "calls": [
         {
           "to": "workload",
-          "call": "ResetAll([pod-0 a1, pod-1 b1, pod-2 c1])",
+          "call": "ResetAll([pod-0 (UID a1), pod-1 (UID b1), pod-2 (UID c1)])",
           "out": "nil, nothing changed"
         }
       ]
@@ -154,7 +154,7 @@
       "calls": [
         {
           "to": "workload",
-          "call": "Reset([pod-0 a2, pod-3 d3])",
+          "call": "Reset([pod-0 (UID a2), pod-3 (UID d3)])",
           "out": "ErrUnsupported, nothing changed"
         }
       ]

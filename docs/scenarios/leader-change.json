@@ -15,7 +15,7 @@
           "phase": "recovering",
           "pods": {"pod-0": {"dp0": {"state": "paused", "membership": "admitted", "status": "unhealthy", "health": 200}}, "pod-1": {"dp1": {"state": "paused", "membership": "admitted", "status": "unhealthy", "health": 200}}, "pod-2": {"dp2": {"state": "paused", "membership": "admitted", "status": "unhealthy", "health": 200}}, "pod-3": {"dp3": {"state": "dead", "membership": "admitted", "status": "healthy", "health": 503}}},
           "calls": [
-            {"to": "workload", "call": "Discover()", "out": "pod-0@a1, pod-1@b1, pod-2@c1, pod-3@d1"},
+            {"to": "workload", "call": "Discover()", "out": "pod-0 (UID a1), pod-1 (UID b1), pod-2 (UID c1), pod-3 (UID d1)"},
             {
               "to": "driver",
               "call": "Observe(pods)",
@@ -27,7 +27,7 @@
                 {"call": "GET /health", "in": "dp3 on pod-3 (UID d1), port 8000", "out": "503"}
               ]
             },
-            {"to": "policy", "call": "Plan(observation, admitted, candidates)", "out": "Change: remove dp3@idD"},
+            {"to": "policy", "call": "Plan(observation, admitted, candidates)", "out": "Change: remove dp3@identity-d1"},
             {"to": "journal", "call": "Save(record)", "in": "phase recovering; incident opened"},
             {"to": "driver", "call": "Probe(observation)", "out": "no serving rank; no HTTP requests"}
           ]
@@ -36,7 +36,7 @@
           "title": "The leader sends the reconfig, then dies",
           "phase": "recovering",
           "calls": [
-            {"to": "workload", "call": "Discover()", "out": "pod-0@a1, pod-1@b1, pod-2@c1, pod-3@d1"},
+            {"to": "workload", "call": "Discover()", "out": "pod-0 (UID a1), pod-1 (UID b1), pod-2 (UID c1), pod-3 (UID d1)"},
             {
               "to": "driver",
               "call": "Observe(pods)",
@@ -49,7 +49,7 @@
               ]
             },
             {"to": "policy", "call": "Plan(observation, admitted, candidates)", "out": "Change: remove dp3"},
-            {"to": "journal", "call": "Save(record)", "in": "reconfig iro-ft-1: remove dp3@idD"},
+            {"to": "journal", "call": "Save(record)", "in": "reconfig iro-ft-1: remove dp3@identity-d1"},
             {
               "to": "driver",
               "call": "Apply(observation, reconfig)",
@@ -68,7 +68,7 @@
           "phase": "recovering",
           "calls": [
             {"to": "journal", "call": "Load()", "out": "recovering, reconfig iro-ft-1, accepted by dp0 dp1 dp2"},
-            {"to": "workload", "call": "Discover()", "out": "pod-0@a1, pod-1@b1, pod-2@c1, pod-3@d1"},
+            {"to": "workload", "call": "Discover()", "out": "pod-0 (UID a1), pod-1 (UID b1), pod-2 (UID c1), pod-3 (UID d1)"},
             {
               "to": "driver",
               "call": "Observe(pods)",
@@ -89,7 +89,7 @@
           "phase": "serving",
           "pods": {"pod-0": {"dp0": {"state": "serving", "membership": "admitted", "status": "healthy", "health": 200}}, "pod-1": {"dp1": {"state": "serving", "membership": "admitted", "status": "healthy", "health": 200}}, "pod-2": {"dp2": {"state": "serving", "membership": "admitted", "status": "healthy", "health": 200}}, "pod-3": {"dp3": {"state": "dead", "membership": "excluded", "status": "healthy", "health": 503}}},
           "calls": [
-            {"to": "workload", "call": "Discover()", "out": "pod-0@a1, pod-1@b1, pod-2@c1, pod-3@d1"},
+            {"to": "workload", "call": "Discover()", "out": "pod-0 (UID a1), pod-1 (UID b1), pod-2 (UID c1), pod-3 (UID d1)"},
             {
               "to": "driver",
               "call": "Observe(pods)",
@@ -112,7 +112,7 @@
             },
             {"to": "journal", "call": "Save(record)", "in": "verification cleared; incident closed"}
           ],
-          "journal": "serving; admitted dp0 dp1 dp2; excluded dp3@idD"
+          "journal": "serving; admitted dp0 dp1 dp2; excluded dp3@identity-d1"
         }
       ]
     }

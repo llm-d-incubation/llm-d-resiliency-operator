@@ -14,7 +14,7 @@
           "title": "The group serves",
           "phase": "serving",
           "calls": [
-            {"to": "workload", "call": "Discover()", "out": "pod-0@a1, pod-1@b1, pod-2@c1, pod-3@d1"},
+            {"to": "workload", "call": "Discover()", "out": "pod-0 (UID a1), pod-1 (UID b1), pod-2 (UID c1), pod-3 (UID d1)"},
             {
               "to": "driver",
               "call": "Observe(pods)",
@@ -33,7 +33,7 @@
           "phase": "recovering",
           "pods": {"pod-0": {"dp0": {"state": "paused", "membership": "admitted", "status": "unhealthy", "health": 200}}, "pod-1": {"dp1": {"state": "paused", "membership": "admitted", "status": "unhealthy", "health": 200}}, "pod-2": {"dp2": {"state": "paused", "membership": "admitted", "status": "unhealthy", "health": 200}}, "pod-3": {"dp3": {"state": "paused", "membership": "admitted", "status": "unhealthy", "health": 200}}},
           "calls": [
-            {"to": "workload", "call": "Discover()", "out": "pod-0@a1, pod-1@b1, pod-2@c1, pod-3@d1"},
+            {"to": "workload", "call": "Discover()", "out": "pod-0 (UID a1), pod-1 (UID b1), pod-2 (UID c1), pod-3 (UID d1)"},
             {
               "to": "driver",
               "call": "Observe(pods)",
@@ -53,7 +53,7 @@
           "phase": "recovering",
           "internal": "vLLM accepts an instruction only while a rank is unhealthy.",
           "calls": [
-            {"to": "workload", "call": "Discover()", "out": "pod-0@a1, pod-1@b1, pod-2@c1, pod-3@d1"},
+            {"to": "workload", "call": "Discover()", "out": "pod-0 (UID a1), pod-1 (UID b1), pod-2 (UID c1), pod-3 (UID d1)"},
             {
               "to": "driver",
               "call": "Observe(pods)",
@@ -79,11 +79,11 @@
         },
         {
           "title": "Back to serving, no member lost",
-          "note": "A second retry cannot follow within 2 minutes (FlapWindow, rule C6), so a fault that keeps coming back ends in a ResetAll instead of a loop.",
+          "note": "A second retry cannot follow within 2 minutes, because a reconfig that changes no members must not repeat that soon (C6). So a fault that keeps coming back ends in a ResetAll instead of a loop.",
           "phase": "serving",
           "pods": {"pod-0": {"dp0": {"state": "serving", "membership": "admitted", "status": "healthy", "health": 200}}, "pod-1": {"dp1": {"state": "serving", "membership": "admitted", "status": "healthy", "health": 200}}, "pod-2": {"dp2": {"state": "serving", "membership": "admitted", "status": "healthy", "health": 200}}, "pod-3": {"dp3": {"state": "serving", "membership": "admitted", "status": "healthy", "health": 200}}},
           "calls": [
-            {"to": "workload", "call": "Discover()", "out": "pod-0@a1, pod-1@b1, pod-2@c1, pod-3@d1"},
+            {"to": "workload", "call": "Discover()", "out": "pod-0 (UID a1), pod-1 (UID b1), pod-2 (UID c1), pod-3 (UID d1)"},
             {
               "to": "driver",
               "call": "Observe(pods)",

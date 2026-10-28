@@ -15,7 +15,7 @@
           "phase": "serving",
           "pods": {"pod-3": {"dp3": {"state": "dead", "membership": "excluded", "status": "healthy", "health": 503}}},
           "calls": [
-            {"to": "workload", "call": "Discover()", "out": "pod-0@a1, pod-1@b1, pod-2@c1, pod-3@d1"},
+            {"to": "workload", "call": "Discover()", "out": "pod-0 (UID a1), pod-1 (UID b1), pod-2 (UID c1), pod-3 (UID d1)"},
             {
               "to": "driver",
               "call": "Observe(pods)",
@@ -45,7 +45,7 @@
           "note": "The controller phase is serving while verification retries. Every rank still reports healthy; the completion check on dp1 returns too few tokens.",
           "phase": "serving",
           "calls": [
-            {"to": "workload", "call": "Discover()", "out": "pod-0@a1, pod-1@b1, pod-2@c1, pod-3@d1"},
+            {"to": "workload", "call": "Discover()", "out": "pod-0 (UID a1), pod-1 (UID b1), pod-2 (UID c1), pod-3 (UID d1)"},
             {
               "to": "driver",
               "call": "Observe(pods)",
@@ -94,7 +94,7 @@
               ]
             },
             {"to": "journal", "call": "Save(record)", "in": "phase starting; saved Pods marked Removing; membership cleared"},
-            {"to": "workload", "call": "ResetAll(pods)", "in": "pod-0@a1, pod-1@b1, pod-2@c1, pod-3@d1; reason: verify_failed", "out": "reset requested for the saved UIDs; the workload recreates the group asynchronously"}
+            {"to": "workload", "call": "ResetAll(pods)", "in": "pod-0 (UID a1), pod-1 (UID b1), pod-2 (UID c1), pod-3 (UID d1); reason: verify_failed", "out": "reset requested for the saved UIDs; the workload recreates the group asynchronously"}
           ],
           "note": "2m by default. In expert parallel every member takes part in every step, so no smaller action is safe.",
           "journal": "starting; membership cleared; saved Pods marked Removing",

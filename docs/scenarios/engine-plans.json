@@ -108,7 +108,7 @@
         {
           "to": "policy",
           "call": "Plan(...)",
-          "out": "Change: Participants m0-m2, Remove m3@idD"
+          "out": "Change: Participants m0-m2, Remove m3@identity-d1"
         },
         {
           "to": "driver",
@@ -140,7 +140,7 @@
         {
           "to": "policy",
           "call": "Plan(...)",
-          "out": "Change: Participants m0-m2, Add m3@idD2"
+          "out": "Change: Participants m0-m2, Add m3@identity-d2"
         },
         {
           "to": "driver",
@@ -165,7 +165,7 @@
         {
           "to": "policy",
           "call": "Plan(...)",
-          "out": "Change: Participants m0, m1, Remove m2@idC, Add m3@idD2"
+          "out": "Change: Participants m0, m1, Remove m2@identity-c1, Add m3@identity-d2"
         }
       ]
     },

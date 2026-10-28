@@ -55,9 +55,9 @@ What a person sees while [a member dies](../failures/member-dies.md), in order:
 
 | When | Event | Metric |
 |---|---|---|
-| `m3` dies | `IncidentOpened`: `inc-7c1e: m3@idD on pod-3 (node gpu-node-7) is dead; recovering` | |
+| `m3` dies | `IncidentOpened`: `inc-7c1e: m3@identity-d1 on pod-3 (node gpu-node-7) is dead; recovering` | |
 | | `PhaseChanged`: serving → recovering | `llm_d_iro_phase_transitions_total{from="serving",to="recovering"}` +1 |
-| the reconfig is sent | `ReconfigStarted`: `inc-7c1e: reconfig iro-ft-7c1e started: shrink, remove m3@idD` | |
+| the reconfig is sent | `ReconfigStarted`: `inc-7c1e: reconfig iro-ft-7c1e started: shrink, remove m3@identity-d1` | |
 | it succeeds | `ReconfigSucceeded` | `llm_d_iro_reconfigs_total{change="shrink",outcome="succeeded"}` +1 |
 | | `PhaseChanged`: recovering → serving | `llm_d_iro_members{state="admitted"} 3`, `{state="excluded"} 1` |
 | `pod-3` is reset | `PodReset`: `resetting pod-3 to bring m3 back` | `llm_d_iro_pod_resets_total` +1 |

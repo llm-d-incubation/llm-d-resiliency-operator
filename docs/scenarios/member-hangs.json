@@ -14,7 +14,7 @@
           "title": "The group serves",
           "phase": "serving",
           "calls": [
-            {"to": "workload", "call": "Discover()", "out": "pod-0@a1, pod-1@b1, pod-2@c1, pod-3@d1"},
+            {"to": "workload", "call": "Discover()", "out": "pod-0 (UID a1), pod-1 (UID b1), pod-2 (UID c1), pod-3 (UID d1)"},
             {
               "to": "driver",
               "call": "Observe(pods)",
@@ -33,7 +33,7 @@
           "phase": "recovering",
           "pods": {"pod-0": {"dp0": {"state": "paused", "membership": "admitted", "status": "unhealthy", "health": 200}}, "pod-1": {"dp1": {"state": "paused", "membership": "admitted", "status": "unhealthy", "health": 200}}, "pod-3": {"dp3": {"state": "paused", "membership": "admitted", "status": "unhealthy", "health": 200}}},
           "calls": [
-            {"to": "workload", "call": "Discover()", "out": "pod-0@a1, pod-1@b1, pod-2@c1, pod-3@d1"},
+            {"to": "workload", "call": "Discover()", "out": "pod-0 (UID a1), pod-1 (UID b1), pod-2 (UID c1), pod-3 (UID d1)"},
             {
               "to": "driver",
               "call": "Observe(pods)",
@@ -63,7 +63,7 @@
           "note": "The probe times out. dp2 continues reporting healthy, so the policy keeps waiting for it to detect the fault.",
           "phase": "recovering",
           "calls": [
-            {"to": "workload", "call": "Discover()", "out": "pod-0@a1, pod-1@b1, pod-2@c1, pod-3@d1"},
+            {"to": "workload", "call": "Discover()", "out": "pod-0 (UID a1), pod-1 (UID b1), pod-2 (UID c1), pod-3 (UID d1)"},
             {
               "to": "driver",
               "call": "Observe(pods)",
@@ -95,7 +95,7 @@
             },
             {"to": "policy", "call": "Plan(observation, admitted, candidates)", "out": "Wait"},
             {"to": "journal", "call": "Save(record)", "in": "phase starting; saved Pods marked Removing; membership cleared"},
-            {"to": "workload", "call": "ResetAll(pods)", "in": "pod-0@a1, pod-1@b1, pod-2@c1, pod-3@d1; reason: diagnosis_deadline", "out": "reset requested for the saved UIDs; the workload recreates the group asynchronously"}
+            {"to": "workload", "call": "ResetAll(pods)", "in": "pod-0 (UID a1), pod-1 (UID b1), pod-2 (UID c1), pod-3 (UID d1); reason: diagnosis_deadline", "out": "reset requested for the saved UIDs; the workload recreates the group asynchronously"}
           ],
           "note": "75s by default, from the fault. Nothing the engine reported could be acted on.",
           "journal": "starting; membership cleared; saved Pods marked Removing",

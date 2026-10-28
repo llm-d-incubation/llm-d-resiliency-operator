@@ -14,7 +14,7 @@
           "title": "The group serves",
           "phase": "serving",
           "calls": [
-            {"to": "workload", "call": "Discover()", "out": "pod-0@a1, pod-1@b1, pod-2@c1, pod-3@d1"},
+            {"to": "workload", "call": "Discover()", "out": "pod-0 (UID a1), pod-1 (UID b1), pod-2 (UID c1), pod-3 (UID d1)"},
             {
               "to": "driver",
               "call": "Observe(pods)",
@@ -43,17 +43,17 @@
                 {"call": "GET /health", "in": "dp0 on pod-0 (UID a1), port 8000; dp1 on pod-1 (UID b1), port 8000; dp2 on pod-2 (UID c1), port 8000", "out": "200"}
               ]
             },
-            {"to": "policy", "call": "Plan(observation, admitted, candidates)", "out": "Change: remove dp3@idD"},
+            {"to": "policy", "call": "Plan(observation, admitted, candidates)", "out": "Change: remove dp3@identity-d1"},
             {"to": "journal", "call": "Save(record)", "in": "phase recovering; incident opened"},
             {"to": "driver", "call": "Probe(observation)", "out": "no serving rank; no HTTP requests"}
           ],
-          "decision": "The controller adds dp3@idD to the observation as Terminal because its saved Pod UID d1 is absent."
+          "decision": "The controller adds dp3@identity-d1 to the observation as Terminal because its saved Pod UID d1 is absent."
         },
         {
           "title": "A reconfig removes dp3",
           "phase": "recovering",
           "calls": [
-            {"to": "workload", "call": "Discover()", "out": "pod-0@a1, pod-1@b1, pod-2@c1"},
+            {"to": "workload", "call": "Discover()", "out": "pod-0 (UID a1), pod-1 (UID b1), pod-2 (UID c1)"},
             {
               "to": "driver",
               "call": "Observe(pods)",
@@ -63,7 +63,7 @@
                 {"call": "GET /health", "in": "dp0 on pod-0 (UID a1), port 8000; dp1 on pod-1 (UID b1), port 8000; dp2 on pod-2 (UID c1), port 8000", "out": "200"}
               ]
             },
-            {"to": "policy", "call": "Plan(observation, admitted, candidates)", "out": "Change: remove dp3@idD"},
+            {"to": "policy", "call": "Plan(observation, admitted, candidates)", "out": "Change: remove dp3@identity-d1"},
             {"to": "journal", "call": "Save(record)", "in": "reconfig iro-ft-1; participants and removed identities; phase recovering"},
             {
               "to": "driver",
@@ -82,7 +82,7 @@
           "phase": "serving",
           "pods": {"pod-0": {"dp0": {"state": "serving", "membership": "admitted", "status": "healthy", "health": 200}}, "pod-1": {"dp1": {"state": "serving", "membership": "admitted", "status": "healthy", "health": 200}}, "pod-2": {"dp2": {"state": "serving", "membership": "admitted", "status": "healthy", "health": 200}}, "pod-3": {"dp3": {"state": "dead", "membership": "excluded"}}},
           "calls": [
-            {"to": "workload", "call": "Discover()", "out": "pod-0@a1, pod-1@b1, pod-2@c1"},
+            {"to": "workload", "call": "Discover()", "out": "pod-0 (UID a1), pod-1 (UID b1), pod-2 (UID c1)"},
             {
               "to": "driver",
               "call": "Observe(pods)",
@@ -125,7 +125,7 @@
         },
         {
           "title": "A replacement serves before admission",
-          "note": "If the replacement reports healthy with /health 200, C5 resets the group before Plan runs. vLLM cannot admit the new rank into the surviving group.",
+          "note": "If the replacement reports healthy with /health 200, it serves before it is admitted, which the safety checks forbid (C5), so the controller resets the group before Plan runs. vLLM cannot admit the new rank into the surviving group.",
           "phase": "starting",
           "calls": [
             {"to": "workload", "call": "Discover()", "out": "saved Pod UIDs are still present before the reset request"},
@@ -139,18 +139,18 @@
               ]
             },
             {"to": "journal", "call": "Save(record)", "in": "phase starting; all saved Pods marked Removing; membership cleared"},
-            {"to": "workload", "call": "ResetAll(pods)", "in": "pod-0@a1, pod-1@b1, pod-2@c1, pod-3@d2; reason: exclusion_broken", "out": "reset requested for the saved UIDs; the workload recreates the group asynchronously"}
+            {"to": "workload", "call": "ResetAll(pods)", "in": "pod-0 (UID a1), pod-1 (UID b1), pod-2 (UID c1), pod-3 (UID d2); reason: exclusion_broken", "out": "reset requested for the saved UIDs; the workload recreates the group asynchronously"}
           ],
           "journal": "starting; membership cleared; saved Pods marked Removing",
           "pods": {"pod-0": {"dp0": {"state": "serving", "membership": "untracked", "status": "healthy", "health": 200}}, "pod-1": {"dp1": {"state": "serving", "membership": "untracked", "status": "healthy", "health": 200}}, "pod-2": {"dp2": {"state": "serving", "membership": "untracked", "status": "healthy", "health": 200}}, "pod-3": {"dp3": {"state": "serving", "membership": "untracked", "status": "healthy", "health": 200}}},
-          "decision": "C5: dp3@idD2 serves before it is admitted. The controller resets the group."
+          "decision": "dp3@identity-d2 serves before it is admitted, which the safety checks forbid (C5). The controller resets the group."
         },
         {
           "title": "A new group serves",
           "phase": "serving",
           "pods": {"pod-0": {"uid": "a3", "dp0": {"state": "serving", "membership": "admitted", "status": "healthy", "health": 200}}, "pod-1": {"uid": "b3", "dp1": {"state": "serving", "membership": "admitted", "status": "healthy", "health": 200}}, "pod-2": {"uid": "c3", "dp2": {"state": "serving", "membership": "admitted", "status": "healthy", "health": 200}}, "pod-3": {"uid": "d3", "dp3": {"state": "serving", "membership": "admitted", "status": "healthy", "health": 200}}},
           "calls": [
-            {"to": "workload", "call": "Discover()", "out": "pod-0@a3, pod-1@b3, pod-2@c3, pod-3@d3"},
+            {"to": "workload", "call": "Discover()", "out": "pod-0 (UID a3), pod-1 (UID b3), pod-2 (UID c3), pod-3 (UID d3)"},
             {
               "to": "driver",
               "call": "Observe(pods)",

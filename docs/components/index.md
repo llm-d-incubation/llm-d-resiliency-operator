@@ -35,8 +35,10 @@ Outside IRO, but the contracts depend on them:
 
 ## Example group
 
-The examples in these pages use one group: four Pods, `pod-0` to `pod-3` (UIDs `a1` to `d1`, identities `idA` to
-`idD`), with one member each, `m0` to `m3`. See them step by step in [Failures](../failures/index.md).
+The examples in these pages use one group: four Pods, `pod-0` to `pod-3` (UIDs `a1` to `d1`), with one member each,
+`m0` to `m3`. See them step by step in [Failures](../failures/index.md). A Pod's identity comes from its UID and
+engine container restarts: `pod-3` with UID `d1` has identity `identity-d1`, so its member is `m3@identity-d1`. A
+replacement Pod with UID `d2` has identity `identity-d2`.
 
 ## One reconciliation step
 
@@ -48,7 +50,6 @@ Two kinds of action, with opposite delivery rules:
 |---|---|---|
 | Engine reconfig (`Apply`) | at most one run. Saved first. Sent again, same ID, only when the send was never confirmed and `Progress` proves no member got it. | running a reconfig twice can break the group, so a resend needs proof, and a member that already got it ignores it |
 | Workload call (`Reset`, `ResetAll`, `Release`) | saved first, repeated every poll until `Discover` shows the result | each call names Pods by UID and does nothing once they are gone, so repeating it is harmless |
-
 
 ## Where each object lives
 

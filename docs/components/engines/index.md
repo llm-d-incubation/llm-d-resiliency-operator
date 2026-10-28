@@ -54,7 +54,7 @@ runs on.
 A Pod gives all of its members, or none when the driver cannot list them, so at the end of `starting` the
 controller admits exactly the members it saw.
 
-A member's ID is `Name@PodIdentity`, such as `m3@idD`. The Pod's identity changes when the Pod is replaced or its
+A member's ID is `Name@PodIdentity`, such as `m3@identity-d1`. The Pod's identity changes when the Pod is replaced or its
 engine restarts, so an ID names exactly one process in one Pod's life, and a replaced member gets a new ID.
 
 `Serving` is not "healthy". `Serving` is what the router sees. "Healthy" is the policy's `Healthy` plan, which
@@ -91,16 +91,16 @@ Right after `m3` dies:
 
 ```yaml
 Members:
-- {Pod: pod-0/a1, PodIdentity: idA, Name: m0, Serving: false, Terminal: false, Detail: "paused, waiting for instruction"}
-- {Pod: pod-1/b1, PodIdentity: idB, Name: m1, Serving: false, Terminal: false, Detail: "paused, waiting for instruction"}
-- {Pod: pod-2/c1, PodIdentity: idC, Name: m2, Serving: false, Terminal: false, Detail: "paused, waiting for instruction"}
-- {Pod: pod-3/d1, PodIdentity: idD, Name: m3, Serving: false, Terminal: true,  Detail: "dead"}
+- {Pod: pod-0/a1, PodIdentity: identity-a1, Name: m0, Serving: false, Terminal: false, Detail: "paused, waiting for instruction"}
+- {Pod: pod-1/b1, PodIdentity: identity-b1, Name: m1, Serving: false, Terminal: false, Detail: "paused, waiting for instruction"}
+- {Pod: pod-2/c1, PodIdentity: identity-c1, Name: m2, Serving: false, Terminal: false, Detail: "paused, waiting for instruction"}
+- {Pod: pod-3/d1, PodIdentity: identity-d1, Name: m3, Serving: false, Terminal: true,  Detail: "dead"}
 Engine: <driver-private: API addresses, raw engine status>
 ```
 
 `Engine` holds whatever the same engine's driver and policy need later, such as addresses. The driver may cache
 internally, keyed by Pod identity, but a new leader must need no warm-up. If `pod-3` is deleted, `Observe`
-returns `m0`-`m2` and the controller adds `{Pod: pod-3/d1, PodIdentity: idD, Name: m3, Terminal: true,
+returns `m0`-`m2` and the controller adds `{Pod: pod-3/d1, PodIdentity: identity-d1, Name: m3, Terminal: true,
 Detail: "pod lost"}`.
 
 ## Noticing a fault
@@ -147,12 +147,12 @@ Every `Change` is one of four shapes:
 
 ```go
 // m3 dead, m0-m2 paused:
-Plan(obs, admitted: [m0@idA m1@idB m2@idC m3@idD], candidates: [])
-// {Kind: Change, Participants: [m0@idA m1@idB m2@idC], Remove: [m3@idD], Reason: "m3 is dead; survivors paused"}
+Plan(obs, admitted: [m0@identity-a1 m1@identity-b1 m2@identity-c1 m3@identity-d1], candidates: [])
+// {Kind: Change, Participants: [m0@identity-a1 m1@identity-b1 m2@identity-c1], Remove: [m3@identity-d1], Reason: "m3 is dead; survivors paused"}
 
 // later, pod-3 was reset, is back as UID d2, and m3 on it is Joinable:
-Plan(obs, admitted: [m0@idA m1@idB m2@idC], candidates: [m3@idD2])
-// {Kind: Change, Participants: [m0@idA m1@idB m2@idC], Add: [m3@idD2], Reason: "candidate ready"}
+Plan(obs, admitted: [m0@identity-a1 m1@identity-b1 m2@identity-c1], candidates: [m3@identity-d2])
+// {Kind: Change, Participants: [m0@identity-a1 m1@identity-b1 m2@identity-c1], Add: [m3@identity-d2], Reason: "candidate ready"}
 
 // m2 is unhealthy, but nobody is dead yet:
 // {Kind: Wait, Reason: "waiting for the engine to finish diagnosis"}
@@ -181,12 +181,12 @@ Plan(obs, admitted: [m0@idA m1@idB m2@idC], candidates: [m3@idD2])
 ```go
 Apply(ctx, obs, Reconfig{
     ID:           "iro-ft-7c1e",
-    Participants: []MemberID{"m0@idA", "m1@idB", "m2@idC"},
-    Remove:       []MemberID{"m3@idD"},
+    Participants: []MemberID{"m0@identity-a1", "m1@identity-b1", "m2@identity-c1"},
+    Remove:       []MemberID{"m3@identity-d1"},
 })
-// all accept:    [{m0@idA true} {m1@idB true} {m2@idC true}], nil
-// one refuses:   [{m0@idA true} {m1@idB false "expected 202, got 409"} {m2@idC true}], error
-// pod-3 deleted: obs holds m3@idD as the controller added it, Apply sends to m0-m2 and all accept
+// all accept:    [{m0@identity-a1 true} {m1@identity-b1 true} {m2@identity-c1 true}], nil
+// one refuses:   [{m0@identity-a1 true} {m1@identity-b1 false "expected 202, got 409"} {m2@identity-c1 true}], error
+// pod-3 deleted: obs holds m3@identity-d1 as the controller added it, Apply sends to m0-m2 and all accept
 ```
 
 An error means the reconfig did not start everywhere, and the controller resets the group.
@@ -213,8 +213,8 @@ An error means the reconfig did not start everywhere, and the controller resets 
 // no participant got iro-ft-7c1e yet, and the engine can prove it: {State: NotStarted}
 // survivors still rebuilding:             {State: Running}
 // m0-m2 healthy, finished iro-ft-7c1e:   {State: Succeeded}
-// m1 reports its FT operation failed:     {State: Failed, Scope: Group, Reason: "m1@idB: FT failed: ..."}
-// a joiner failed, survivors untouched:   {State: Failed, Scope: Joiners, Reason: "m3@idD2 could not join"}
+// m1 reports its FT operation failed:     {State: Failed, Scope: Group, Reason: "m1@identity-b1: FT failed: ..."}
+// a joiner failed, survivors untouched:   {State: Failed, Scope: Joiners, Reason: "m3@identity-d2 could not join"}
 ```
 
 | Rule | Why |
@@ -235,9 +235,9 @@ after a reconfig succeeds, for the members that took part or joined.
 | **Side effects** | a few tokens of inference, marked so they are not counted as user traffic |
 
 ```go
-Verify(ctx, obs, []MemberID{"m0@idA", "m1@idB", "m2@idC"})
+Verify(ctx, obs, []MemberID{"m0@identity-a1", "m1@identity-b1", "m2@identity-c1"})
 // nil
-// or: error "m1@idB: no tokens generated". The controller retries every poll for --ft-verify-timeout, then resets.
+// or: error "m1@identity-b1: no tokens generated". The controller retries every poll for --ft-verify-timeout, then resets.
 ```
 
 ## Growing back
