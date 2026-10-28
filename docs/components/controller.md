@@ -168,7 +168,7 @@ the workload (the Pod is gone, `Terminating` or restarted) proves a process is g
 
 A failed `Discover`, or an `Observe` that reads no admitted member, proves nothing about the group: IRO may be
 the one cut off. The controller keeps the phase, opens no incident, asks for no plan, notes the time in
-`UnseenSince`, and pauses its deadlines. When it sees the group again, its deadlines move forward by the time
+`PausedSince`, and pauses its deadlines. When it sees the group again, its deadlines move forward by the time
 it could not see.
 
 A group whose every member hangs, or whose single frontend hangs, looks the same, so the wait is bounded: once
@@ -176,10 +176,13 @@ no admitted member has been readable for `--ft-unseen-timeout`, the group is res
 timeout is long, so a short blip on IRO's side never resets a group that serves. A failed `Discover` never
 resets: IRO cannot see the Pods it would name.
 
-The timeout counts only time IRO could read the engine and got nothing. Time when `Discover` failed never looked
-at the engine, so once `Discover` works again the clock restarts, and the engine gets its own full
-`--ft-unseen-timeout` before the group is reset. This holds even if the engine was already unreadable before
-`Discover` failed: IRO then waits longer, never shorter.
+The timeout accumulates time when `Discover` succeeds and `Observe` reads no admitted member. A failed
+`Discover` pauses this budget; it resumes when discovery works again. A readable admitted member clears the
+accumulated time.
+
+The recovery pause spans changes between failed discovery and an unreadable engine. Diagnosis, apply and
+verification retain the time accrued before the pause. Both clocks survive a leader change. Records without
+`PausedSince` use `UnseenSince` as the start of the recovery pause.
 
 See the [unreadable-group example](../failures/iro-blind.md).
 
@@ -323,7 +326,7 @@ the controller skipped, in `WouldDo`, so the next poll does not start over.
 On every poll the controller compares what it would do now with what the state already says, and records (logs)
 only when that changes.
 
-```
+```text
 poll 1: dp3 dead  -> state empty           -> record "would remove dp3"
 poll 2: dp3 dead  -> state = remove dp3    -> same, stay quiet
 poll 3: dp3 dead  -> state = remove dp3    -> same, stay quiet
@@ -431,8 +434,10 @@ type Record struct {
 
     LastNoChangeReconfig time.Time // check C6
     VerifyFailedSince    time.Time
-    UnseenSince          time.Time // Discover failed, or Observe read no admitted member. Deadlines do not count this time.
-    UnseenByDiscover     bool      // Discover failed since UnseenSince: the clock restarts once Discover works again
+    PausedSince          time.Time // recovery deadlines are paused from here
+    UnseenSince          time.Time // the current discovery or engine visibility interval began here
+    UnseenByDiscover     bool      // the current wait is for a failed Discover
+    UnseenElapsed        time.Duration // earlier engine blindness, excluding time Discover failed
     RecreateStopped      bool      // from the last Discover, so people can see the workload gave up
 
     Incident *Incident // the open incident, nil when none. Closed ones go to telemetry.
