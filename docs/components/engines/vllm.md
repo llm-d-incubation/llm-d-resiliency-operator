@@ -44,7 +44,8 @@ Rules that shape the driver:
 
 Probe and Verify use ordinary completion requests and count toward vLLM request and token metrics.
 The API provides no option to exclude them; dashboards and traffic accounting must allow for this traffic.
-Verify sets `ignore_eos` and requires 8 completion tokens, including tokens hidden from the response text.
+Verify sets `ignore_eos` and requires one choice with `finish_reason=length` and 8 completion tokens,
+including tokens hidden from the response text. An aborted HTTP-200 completion fails verification.
 
 ## Policy
 
