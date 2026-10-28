@@ -484,6 +484,7 @@ func (fsm *controller) serve(ctx context.Context, next *Record, current *view, n
 }
 
 func (fsm *controller) enterRecovering(ctx context.Context, next *Record, current *view, plan *engine.Plan, now time.Time) error {
+	next.Verifying, next.VerifyFailedSince = nil, time.Time{}
 	enter(next, Recovering, plan.Reason, now)
 	if next.Incident == nil {
 		fsm.openIncident(next, plan.Reason, current, now)
@@ -505,8 +506,20 @@ func (fsm *controller) recover(ctx context.Context, next *Record, current *view,
 	if plan.Kind == engine.Healthy && len(current.unknown) > 0 {
 		plan = engine.Plan{Kind: engine.Wait, Reason: "cannot read " + joined(current.unknown)}
 	}
+	if len(next.Verifying) > 0 && plan.Kind != engine.Healthy {
+		return fsm.enterRecovering(ctx, next, current, &plan, now)
+	}
 	switch {
 	case plan.Kind == engine.Healthy:
+		if !fsm.config.DryRun {
+			if len(next.Verifying) == 0 {
+				next.Verifying, next.Since = slices.Clone(current.admitted), now
+				if err := fsm.save(ctx, next); err != nil {
+					return err
+				}
+			}
+			return fsm.verify(ctx, next, current, now)
+		}
 		enter(next, Serving, plan.Reason, now)
 		if len(next.Verifying) == 0 {
 			fsm.closeIncident(next, outcome(next.Incident), now)
