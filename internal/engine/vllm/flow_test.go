@@ -156,8 +156,11 @@ func (wl *lwsToday) Discover(context.Context) (workload.Group, error) {
 
 func (*lwsToday) Reset(context.Context, []workload.PodRef) error { return workload.ErrUnsupported }
 
-func (wl *lwsToday) ResetAll(context.Context, []workload.PodRef) error {
+func (wl *lwsToday) ResetAll(_ context.Context, targets []workload.PodRef) error {
 	wl.resetAll++
+	wl.pods = slices.DeleteFunc(wl.pods, func(pod workload.Pod) bool {
+		return slices.ContainsFunc(targets, func(target workload.PodRef) bool { return target.UID == pod.UID })
+	})
 	return nil
 }
 
@@ -221,12 +224,12 @@ func (run *flow) fault(dead ...int) {
 }
 
 func served(record *enginefault.Record) bool {
-	return record.Phase == enginefault.Serving && record.Reconfig == nil && len(record.Verifying) == 0 && record.Incident == nil
+	return record.Phase == enginefault.Serving && record.Operation == nil && record.Incident == nil
 }
 
 func kept(id string) func(enginefault.Record) bool {
 	return func(record enginefault.Record) bool {
-		return served(&record) && record.Members[engine.MemberID(id)] == enginefault.Rejected
+		return served(&record) && record.Members[engine.MemberID(id)] == enginefault.Excluded
 	}
 }
 
@@ -307,14 +310,24 @@ func TestFlowEngineProcessGone(t *testing.T) {
 	run.until("shrunk and kept below full", kept("dp2@id2"))
 }
 
-func TestFlowFaultAfterTheReconfigResetsAtOnce(t *testing.T) {
+func TestFlowUncertainReconfigurationStopsAtDeadline(t *testing.T) {
 	t.Parallel()
-	run := newFlowWith(t, 30*time.Second)
+	run := newFlowWith(t, 10*time.Millisecond)
 	run.sim.refault = true
 	run.fault(3)
-	started := time.Now()
-	run.until("reset", func(record enginefault.Record) bool { return record.Phase == enginefault.Starting })
-	if run.wl.resetAll == 0 || time.Since(started) > 5*time.Second {
-		t.Fatalf("group resets %d after %v", run.wl.resetAll, time.Since(started))
+	record := run.until("blocked pending reconfiguration", func(record enginefault.Record) bool {
+		return record.OperationBlocked != ""
+	})
+	if run.wl.resetAll != 0 || record.Operation == nil || record.Operation.Action.Kind != engine.Change {
+		t.Fatalf("uncertain operation was replaced: %+v, group resets %d", record, run.wl.resetAll)
+	}
+	applies := len(run.sim.applies)
+	for range 3 {
+		if err := run.fsm.Step(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(run.sim.applies) != applies || run.wl.resetAll != 0 {
+		t.Fatalf("blocked operation mutated: applies %d to %d, group resets %d", applies, len(run.sim.applies), run.wl.resetAll)
 	}
 }

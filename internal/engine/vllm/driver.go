@@ -94,7 +94,7 @@ func (eng *Engine) read(ctx context.Context, target *rank) {
 	target.Reached = true
 }
 
-func (eng *Engine) Probe(ctx context.Context, observation engine.Observation) error {
+func (eng *Engine) probe(ctx context.Context, observation engine.Observation) error {
 	payload := map[string]any{"prompt": "ping", "max_tokens": 1}
 	var mu sync.Mutex
 	var errs []error
@@ -116,58 +116,136 @@ func (eng *Engine) Probe(ctx context.Context, observation engine.Observation) er
 	return errors.Join(errs...)
 }
 
-//nolint:gocritic // The interface passes the reconfig by value.
-func (eng *Engine) Apply(
-	ctx context.Context, observation engine.Observation, reconfig engine.Reconfig,
-) ([]engine.Acceptance, error) {
+//nolint:gocritic // The driver contract passes ApplyInput by value.
+func (eng *Engine) Apply(ctx context.Context, input engine.ApplyInput) (engine.Report, error) {
+	operation := &input.Operation
+	switch operation.Action.Kind {
+	case engine.Probe, engine.Verify:
+		if !input.MayAdvance {
+			return engine.Report{State: engine.Running, Reason: "execution is suspended"}, nil
+		}
+		var err error
+		if operation.Action.Kind == engine.Probe {
+			err = eng.probe(ctx, input.Observation)
+		} else {
+			err = eng.verify(ctx, input.Observation, operation.Action.Participants)
+		}
+		if err != nil {
+			return failed(err.Error()), nil
+		}
+		return engine.Report{State: engine.Succeeded}, nil
+	case engine.Change:
+		return eng.applyChange(ctx, &input)
+	default:
+		return engine.Report{State: engine.Running}, fmt.Errorf("unsupported engine action %q", operation.Action.Kind)
+	}
+}
+
+func (eng *Engine) applyChange(ctx context.Context, input *engine.ApplyInput) (engine.Report, error) {
+	reconfig := input.Operation.Reconfig()
+	report := changeReport(input.Observation, &reconfig)
+	if input.Operation.Attempted || requestObserved(input.Observation, &reconfig) {
+		return report, nil
+	}
+	if !input.MayAdvance {
+		return engine.Report{State: engine.Running, Reason: "execution is suspended"}, nil
+	}
+	if err := eng.submit(ctx, input.Observation, &reconfig); err != nil {
+		return engine.Report{State: engine.Running, Reason: "submission outcome requires observation"}, err
+	}
+	return engine.Report{State: engine.Running, Reason: "reconfiguration submitted"}, nil
+}
+
+func requestObserved(observation engine.Observation, reconfig *engine.Reconfig) bool {
+	for _, id := range reconfig.Participants {
+		if r := ranksOf(observation)[id]; r != nil && r.RequestID == reconfig.ID {
+			return true
+		}
+	}
+	return false
+}
+
+func changeReport(observation engine.Observation, reconfig *engine.Reconfig) engine.Report {
+	if len(reconfig.Participants) == 0 {
+		return engine.Report{State: engine.Running, Reason: "no participants to observe"}
+	}
+	members, found := membersOf(observation), ranksOf(observation)
+	done := 0
+	for _, id := range reconfig.Participants {
+		member, r := members[id], found[id]
+		switch {
+		case member != nil && member.Terminal:
+			return failed(fmt.Sprintf("%s died during the reconfiguration: %s", id, member.Detail))
+		case member == nil || r == nil || !r.Reached:
+		case r.FTState == "failed" && r.RequestID == reconfig.ID:
+			return failed(fmt.Sprintf("%s failed the reconfiguration: %s", id, r.FTError))
+		case r.RequestID != "" && r.RequestID != reconfig.ID:
+		case r.FTState == "recovering":
+		case member.Serving:
+			done++
+		}
+	}
+	if done == len(reconfig.Participants) {
+		return engine.Report{State: engine.Succeeded, Reason: fmt.Sprintf("%d ranks healthy", done)}
+	}
+	return engine.Report{
+		State: engine.Running, Reason: fmt.Sprintf("%d of %d ranks healthy; outcome pending", done, len(reconfig.Participants)),
+	}
+}
+
+func failed(reason string) engine.Report {
+	return engine.Report{State: engine.Failed, Scope: engine.Group, Reason: reason}
+}
+
+func (eng *Engine) submit(ctx context.Context, observation engine.Observation, reconfig *engine.Reconfig) error {
 	if len(reconfig.Add) > 0 {
-		return nil, errors.New("vLLM cannot admit members")
+		return errors.New("vLLM cannot admit members")
+	}
+	if reconfig.ID == "" || len(reconfig.Participants) == 0 {
+		return errors.New("reconfiguration requires an ID and participants")
 	}
 	found := ranksOf(observation)
 	for _, id := range reconfig.Participants {
-		if r := found[id]; r == nil || !r.Reached {
-			return nil, fmt.Errorf("%s cannot be reached", id)
+		r := found[id]
+		if r == nil || !r.Reached {
+			return fmt.Errorf("%s cannot be reached", id)
+		}
+		if r.Status != "unhealthy" || r.FTState == "recovering" {
+			return fmt.Errorf("%s is not ready for a reconfiguration", id)
 		}
 	}
 	members := membersOf(observation)
 	for _, id := range reconfig.Remove {
 		if member := members[id]; member == nil || !member.Terminal {
-			return nil, fmt.Errorf("%s is not a terminal member of the observation", id)
+			return fmt.Errorf("%s is not a terminal member of the observation", id)
 		}
 	}
 	instruction, params := "retry", map[string]any{}
 	if len(reconfig.Remove) > 0 {
 		var err error
 		instruction = "scale_down"
-		if params, err = eng.scaleDown(found, reconfig); err != nil {
-			return nil, err
+		if params, err = eng.scaleDown(found, *reconfig); err != nil {
+			return err
 		}
 	}
 	payload := map[string]any{"instruction": instruction, "request_id": reconfig.ID, "params": params}
-	acceptances := make([]engine.Acceptance, len(reconfig.Participants))
+	errs := make([]error, len(reconfig.Participants))
 	var wg sync.WaitGroup
 	for index, id := range reconfig.Participants {
-		acceptances[index].Member = id
 		r := found[id]
 		wg.Go(func() {
 			callCtx, cancel := context.WithTimeout(ctx, eng.options.Timeout)
 			defer cancel()
 			_, code, err := eng.call(callCtx, http.MethodPost, r.Address, "/v1/fault_tolerance/apply", payload)
-			acceptances[index].Accepted = err == nil && code == http.StatusAccepted
 			if err != nil {
-				acceptances[index].Error = err.Error()
+				errs[index] = fmt.Errorf("%s submission: %w", id, err)
 			} else if code != http.StatusAccepted {
-				acceptances[index].Error = fmt.Sprintf("HTTP %d, want 202", code)
+				errs[index] = fmt.Errorf("%s submission: HTTP %d, want 202", id, code)
 			}
 		})
 	}
 	wg.Wait()
-	for _, acceptance := range acceptances {
-		if !acceptance.Accepted {
-			return acceptances, fmt.Errorf("%s did not accept %s: %s", acceptance.Member, instruction, acceptance.Error)
-		}
-	}
-	return acceptances, nil
+	return errors.Join(errs...)
 }
 
 //nolint:gocritic // The interface passes the reconfig by value.
@@ -215,7 +293,7 @@ func numbers(ids []engine.MemberID) ([]int, error) {
 	return result, nil
 }
 
-func (eng *Engine) Verify(ctx context.Context, observation engine.Observation, members []engine.MemberID) error {
+func (eng *Engine) verify(ctx context.Context, observation engine.Observation, members []engine.MemberID) error {
 	if len(members) == 0 {
 		return errors.New("nothing to verify")
 	}
@@ -235,7 +313,9 @@ func (eng *Engine) Verify(ctx context.Context, observation engine.Observation, m
 					CompletionTokens int `json:"completion_tokens"`
 				} `json:"usage"`
 			}
-			body, _, err := eng.call(ctx, http.MethodPost, r.Address, "/v1/completions", payload)
+			callCtx, cancel := context.WithTimeout(ctx, eng.options.Timeout)
+			defer cancel()
+			body, _, err := eng.call(callCtx, http.MethodPost, r.Address, "/v1/completions", payload)
 			if err == nil {
 				err = json.Unmarshal(body, &response)
 			}

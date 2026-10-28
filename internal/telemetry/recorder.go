@@ -18,10 +18,11 @@ import (
 
 // Recorder writes one log line per event. Metrics, Events and incident history come with #25 and #30.
 type Recorder struct {
-	log   logr.Logger
-	stale time.Duration
-	mu    sync.Mutex
-	last  time.Time
+	log     logr.Logger
+	stale   time.Duration
+	mu      sync.Mutex
+	last    time.Time
+	blocked string
 }
 
 var _ enginefault.Recorder = (*Recorder)(nil)
@@ -33,7 +34,20 @@ func New(log logr.Logger, stale time.Duration) *Recorder {
 func (rec *Recorder) Stepped(record *enginefault.Record, err error) {
 	rec.mu.Lock()
 	rec.last = time.Now()
+	blocked := record.OperationBlocked
+	if blocked == "" {
+		blocked = record.Budget.Blocked
+	}
+	previous := rec.blocked
+	rec.blocked = blocked
 	rec.mu.Unlock()
+	if blocked != previous {
+		if blocked != "" {
+			rec.log.Info("recovery blocked", "reason", blocked, "actions", record.Budget.Actions)
+		} else {
+			rec.log.Info("recovery unblocked")
+		}
+	}
 	if err != nil {
 		rec.log.Error(err, "step failed", "phase", record.Phase, "reason", record.Reason)
 	}
@@ -48,11 +62,11 @@ func (rec *Recorder) IncidentOpened(incident *enginefault.Incident) {
 		"affected", incident.Affected, "nodes", incident.Nodes)
 }
 
-func (rec *Recorder) ReconfigStarted(reconfig *engine.Reconfig, plan *engine.Plan) {
+func (rec *Recorder) ReconfigStarted(reconfig *engine.Reconfig, plan *engine.Action) {
 	rec.log.Info("reconfig started", "reconfig", reconfig.ID, "remove", reconfig.Remove, "add", reconfig.Add, "reason", plan.Reason)
 }
 
-func (rec *Recorder) ReconfigFinished(reconfig *engine.Reconfig, progress engine.Progress) {
+func (rec *Recorder) ReconfigFinished(reconfig *engine.Reconfig, progress engine.Report) {
 	rec.log.Info("reconfig finished", "reconfig", reconfig.ID, "state", progress.State, "scope", progress.Scope,
 		"reason", progress.Reason)
 }

@@ -6,6 +6,8 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
+	"time"
 
 	"github.com/llm-d/llm-d-resiliency-operator/internal/workload"
 )
@@ -22,15 +24,44 @@ type Capabilities struct {
 
 type Driver interface {
 	Observe(ctx context.Context, pods []workload.Pod) Observation
-	Probe(ctx context.Context, observation Observation) error
-	Apply(ctx context.Context, observation Observation, reconfig Reconfig) ([]Acceptance, error)
-	Verify(ctx context.Context, observation Observation, members []MemberID) error
+	Apply(ctx context.Context, input ApplyInput) (Report, error)
 }
 
 // Policy is pure: no I/O, no clock.
 type Policy interface {
-	Plan(observation Observation, admitted, candidates []MemberID) Plan
-	Progress(observation Observation, reconfig Reconfig) Progress
+	Decide(input DecisionInput) Action
+}
+
+type DecisionInput struct {
+	Observation         Observation
+	Admitted            []MemberID
+	Candidates          []MemberID
+	Excluded            []MemberID
+	Rejected            []MemberID
+	State               json.RawMessage
+	LastResult          *Result
+	Starting            bool
+	ObservationTimedOut bool
+	Fault               string
+	Elapsed             time.Duration
+	DiagnosisTimeout    time.Duration
+	VerifyTimeout       time.Duration
+	FlapWindow          time.Duration
+	Budget              RecoveryBudget
+}
+
+type RecoveryBudget struct {
+	Actions    int
+	MaxActions int
+	Elapsed    time.Duration
+	Timeout    time.Duration
+	Blocked    string
+}
+
+type ApplyInput struct {
+	Observation Observation
+	Operation   Operation
+	MayAdvance  bool
 }
 
 type MemberID string
@@ -39,6 +70,7 @@ type Member struct {
 	Pod         workload.PodRef
 	PodIdentity string
 	Name        string
+	Replaces    MemberID
 	Serving     bool
 	Terminal    bool
 	Unknown     bool
@@ -58,44 +90,66 @@ type Reconfig struct {
 	Participants []MemberID
 	Remove       []MemberID
 	Add          []MemberID
+	Payload      json.RawMessage `json:",omitempty"`
 }
 
-type Acceptance struct {
-	Member   MemberID
-	Accepted bool
-	Error    string
-}
-
-type Plan struct {
-	Kind         PlanKind
+type Action struct {
+	Kind         ActionKind
 	Participants []MemberID
 	Remove       []MemberID
 	Add          []MemberID
+	Members      []MemberID
+	Payload      json.RawMessage `json:",omitempty"`
+	State        json.RawMessage `json:",omitempty"`
 	Reason       string
 }
 
-type PlanKind string
-
-const (
-	Healthy       PlanKind = "Healthy"
-	Wait          PlanKind = "Wait"
-	Change        PlanKind = "Change"
-	Unrecoverable PlanKind = "Unrecoverable"
-)
-
-type Progress struct {
-	State  ProgressState
-	Scope  FailureScope
-	Reason string
+type Operation struct {
+	ID         string
+	Action     Action
+	Checkpoint json.RawMessage `json:",omitempty"`
+	Attempted  bool
 }
 
-type ProgressState string
+func (operation *Operation) Reconfig() Reconfig {
+	return Reconfig{
+		ID: operation.ID, Participants: operation.Action.Participants,
+		Remove: operation.Action.Remove, Add: operation.Action.Add, Payload: operation.Action.Payload,
+	}
+}
+
+type Result struct {
+	Operation Operation
+	State     Status
+	Scope     FailureScope
+	Reason    string
+}
+
+type ActionKind string
 
 const (
-	NotStarted ProgressState = "NotStarted"
-	Running    ProgressState = "Running"
-	Succeeded  ProgressState = "Succeeded"
-	Failed     ProgressState = "Failed"
+	Healthy        ActionKind = "Healthy"
+	Wait           ActionKind = "Wait"
+	Change         ActionKind = "Change"
+	Probe          ActionKind = "Probe"
+	Verify         ActionKind = "Verify"
+	ReplaceMembers ActionKind = "ReplaceMembers"
+	RecreateGroup  ActionKind = "RecreateGroup"
+)
+
+type Report struct {
+	State      Status
+	Scope      FailureScope
+	Reason     string
+	Checkpoint json.RawMessage `json:",omitempty"`
+}
+
+type Status string
+
+const (
+	Running   Status = "Running"
+	Succeeded Status = "Succeeded"
+	Failed    Status = "Failed"
 )
 
 type FailureScope string

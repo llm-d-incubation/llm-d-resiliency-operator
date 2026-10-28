@@ -15,8 +15,8 @@ type Recorder interface {
 	Stepped(record *Record, err error)
 	PhaseChanged(from, to Phase, reason string)
 	IncidentOpened(incident *Incident)
-	ReconfigStarted(reconfig *engine.Reconfig, plan *engine.Plan)
-	ReconfigFinished(reconfig *engine.Reconfig, progress engine.Progress)
+	ReconfigStarted(reconfig *engine.Reconfig, plan *engine.Action)
+	ReconfigFinished(reconfig *engine.Reconfig, progress engine.Report)
 	PodResetRequested(pods []workload.PodRef, err error)
 	ResetAllRequested(reason ResetReason, pods []workload.PodRef)
 	ReleaseRequested(pods []workload.PodRef, err error)
@@ -41,7 +41,7 @@ type Incident struct {
 
 type ReconfigResult struct {
 	Reconfig engine.Reconfig `json:"reconfig"`
-	Progress engine.Progress `json:"progress"`
+	Report   engine.Report   `json:"progress"`
 }
 
 type Outcome string
@@ -63,6 +63,7 @@ type Durations struct {
 type ResetReason string
 
 const (
+	ResetPolicy            ResetReason = "policy"
 	ResetUnrecoverable     ResetReason = "unrecoverable"
 	ResetReconfigFailed    ResetReason = "reconfig_failed"
 	ResetDiagnosisDeadline ResetReason = "diagnosis_deadline"
