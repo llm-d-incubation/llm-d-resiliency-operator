@@ -72,4 +72,5 @@ const (
 	ResetExclusionBroken   ResetReason = "exclusion_broken"
 	ResetCapacity          ResetReason = "capacity"
 	ResetUnseen            ResetReason = "unseen"
+	ResetJournalLost       ResetReason = "journal_lost"
 )

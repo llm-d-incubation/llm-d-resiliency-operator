@@ -78,6 +78,7 @@ type Record struct {
 	UnseenSince          time.Time `json:"unseen_since,omitzero"`
 	UnseenByDiscover     bool      `json:"unseen_by_discover,omitempty"`
 	RecreateStopped      bool      `json:"recreate_stopped,omitempty"`
+	ResetPending         bool      `json:"reset_pending,omitempty"`
 
 	Incident *Incident `json:"incident,omitempty"`
 

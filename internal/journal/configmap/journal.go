@@ -69,6 +69,9 @@ func (store *Journal) Save(ctx context.Context, data []byte, previous string) (s
 	case current.ResourceVersion != resourceVersion && hash(current.Data[key]) != digest:
 		return "", fmt.Errorf("%w: the record changed", journal.ErrConflict)
 	}
+	if current.Data[key] == string(data) {
+		return versionOf(&current), nil
+	}
 	// An edit that leaves the record alone, such as a new annotation, is not another writer.
 	if current.Data == nil {
 		current.Data = map[string]string{}

@@ -4,7 +4,6 @@
 package enginefault
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -75,13 +74,14 @@ func load(ctx context.Context, wl workload.Workload, eng engine.Engine, store jo
 	if !slices.Contains([]Phase{Starting, Serving, Recovering}, record.Phase) {
 		record = Record{Phase: Starting, Since: now().UTC(), Reason: "new group"}
 	}
+	if len(data) == 0 {
+		record.ResetPending = !config.DryRun
+	}
 	saved, err := json.Marshal(&record)
 	if err != nil {
 		return nil, err
 	}
-	if len(data) == 0 {
-		saved = nil
-	}
+
 	return &controller{
 		wl: wl, eng: eng, store: store, recorder: recorder, config: config, now: now, saved: saved, version: version,
 		waited: true,
@@ -118,21 +118,19 @@ func (fsm *controller) save(ctx context.Context, next *Record) error {
 	if err != nil {
 		return err
 	}
-	if !bytes.Equal(data, fsm.saved) {
-		version, err := fsm.store.Save(ctx, data, fsm.version)
-		if err != nil {
-			fsm.pending = nil
-			fsm.recorder.SaveFailed(err)
-			return fmt.Errorf("save journal: %w", err)
-		}
-		previous := fsm.record()
-		fsm.saved, fsm.version = data, version
-		if previous.Phase != next.Phase {
-			fsm.recorder.PhaseChanged(previous.Phase, next.Phase, next.Reason)
-		}
-		if previous.WouldDo != next.WouldDo {
-			fsm.recorder.WouldDo(previous.WouldDo, next.WouldDo, next.Reason)
-		}
+	version, err := fsm.store.Save(ctx, data, fsm.version)
+	if err != nil {
+		fsm.pending = nil
+		fsm.recorder.SaveFailed(err)
+		return fmt.Errorf("save journal: %w", err)
+	}
+	previous := fsm.record()
+	fsm.saved, fsm.version = data, version
+	if previous.Phase != next.Phase {
+		fsm.recorder.PhaseChanged(previous.Phase, next.Phase, next.Reason)
+	}
+	if previous.WouldDo != next.WouldDo {
+		fsm.recorder.WouldDo(previous.WouldDo, next.WouldDo, next.Reason)
 	}
 	for _, emit := range fsm.pending {
 		emit()
@@ -165,6 +163,18 @@ func (fsm *controller) step(ctx context.Context, next *Record) error {
 	next.RecreateStopped = group.RecreateStopped
 	if waiting, err := fsm.waitForWorkload(ctx, next, &group, now); waiting || err != nil {
 		return err
+	}
+	if next.ResetPending {
+		next.ResetPending = false
+		next.Pods = map[string]PodRecord{}
+		for _, pod := range group.Pods {
+			if pod.State != workload.PodTerminating {
+				next.Pods[pod.UID] = PodRecord{Name: pod.Name, Identity: pod.Identity, Node: pod.Node}
+			}
+		}
+		if len(next.Pods) > 0 {
+			return fsm.resetAll(ctx, next, ResetJournalLost, "the saved recovery state is missing", now)
+		}
 	}
 	if next.Phase != Starting && !sameGroup(next, &group) {
 		fsm.startOver(next, "new group", now)
