@@ -26,7 +26,7 @@ func (fsm *controller) watch(ctx context.Context, next *Record, current *view, n
 		fsm.finishReconfig(next, &progress, now)
 		next.Verifying = append(slices.Clone(reconfig.Participants), reconfig.Add...)
 		next.VerifyFailedSince = time.Time{}
-		enter(next, Serving, "reconfig "+reconfig.ID+" succeeded", now)
+		enter(next, Recovering, "verifying reconfig "+reconfig.ID, now)
 		if err := fsm.save(ctx, next); err != nil {
 			return err
 		}
@@ -161,6 +161,12 @@ func checkPlan(next *Record, current *view, plan *engine.Plan) string {
 }
 
 func (fsm *controller) verify(ctx context.Context, next *Record, current *view, now time.Time) error {
+	if next.Phase != Recovering {
+		enter(next, Recovering, "verifying recovery", now)
+		if err := fsm.save(ctx, next); err != nil {
+			return err
+		}
+	}
 	// A Verify that outlives its share of the step is a failed check, not a stall.
 	verifyCtx, cancel := context.WithTimeout(ctx, fsm.config.ApplyTimeout/2)
 	err := fsm.eng.Verify(verifyCtx, current.obs, next.Verifying)
@@ -174,6 +180,7 @@ func (fsm *controller) verify(ctx context.Context, next *Record, current *view, 
 			inc.Durations.Verify = now.Sub(next.Since)
 			fsm.closeIncident(next, outcome(inc), now)
 		}
+		enter(next, Serving, "verified", now)
 		return nil
 	}
 	if next.VerifyFailedSince.IsZero() && fsm.config.VerifyTimeout > 0 {

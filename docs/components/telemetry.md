@@ -86,7 +86,7 @@ values from fixed sets only. Names follow llm-d: `llm_d_iro_*`, like `llm_d_epp_
 | `llm_d_iro_incidents_total` | counter | `outcome` | closed incidents by outcome |
 | `llm_d_iro_incident_duration_seconds` | histogram | `stage` | diagnose, apply, verify, total |
 | `llm_d_iro_journal_save_failures_total` | counter | | failed journal saves |
-| `llm_d_iro_last_verified_timestamp_seconds` | gauge | | when the last reconfig's members passed `Verify` |
+| `llm_d_iro_last_verified_timestamp_seconds` | gauge | | when the last recovery's members passed `Verify` |
 
 Alerts this allows: recovering for more than N minutes, below full for more than N minutes, the group unseen
 for more than N minutes, journal saves failing, no leader.

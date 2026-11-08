@@ -509,7 +509,7 @@ def phases():
     pill = [
         ("starting", 70, "grey", "the group comes up"),
         ("serving", 450, "green", "the group serves"),
-        ("recovering", 830, "amber", "a fault is repaired"),
+        ("recovering", 830, "amber", "repair and verify"),
     ]
     for name, x, tone, line in pill:
         s.rect(x, 130, 200, 84, C[tone], C[tone + "_bg"], r=42, sw=2.5)
@@ -517,7 +517,7 @@ def phases():
         s.text(x + 100, 190, line, 13, color=C["muted"], anchor="middle")
     s.arrow([(270, 172), (450, 172)], C["green"], "every member is up", (360, 162))
     s.arrow([(650, 158), (830, 158)], C["amber"], "a fault", (740, 148))
-    s.arrow([(830, 192), (650, 192)], C["green"], "repaired", (740, 212))
+    s.arrow([(830, 192), (650, 192)], C["green"], "verified", (740, 212))
     s.arrow([(550, 214), (550, 270), (200, 270), (200, 214)], C["red"])
     s.arrow([(930, 214), (930, 310), (140, 310), (140, 214)], C["red"])
     s.text(375, 262, "reset the group", 13, color=C["red"], bold=True, anchor="middle")
