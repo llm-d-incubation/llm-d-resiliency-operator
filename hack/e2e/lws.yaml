@@ -1,0 +1,237 @@
+# vLLM deployment for the "a member dies" e2e test, with the defaults below:
+# DeepSeek-V2-Lite, TP=1/DP=4/EP=4, four ranks in one Pod on four GPUs. EPLB
+# runs with 32 redundant experts so losing one of four ranks still covers every
+# logical expert: (4-1)*(64+32)/4 = 72 >= 64. IRO sees four members in this one
+# Pod, e.g. dp2@<pod-uid>, one vLLM server per rank on API_PORT + rank.
+#
+# One Pod, four ranks: EPLB scale_down moves peer GPU memory over NVLink and
+# CUDA IPC, which need one host and one IPC namespace. size 1 creates only the
+# leader Pod; the CRD still requires workerTemplate, which is identical.
+#
+# Values that depend on the cluster are substituted from the environment:
+#
+#   NAMESPACE          namespace of the LWS and the journal (required)
+#   VLLM_IMAGE         fault-tolerance vLLM image (required)
+#   LWS_NAME           LeaderWorkerSet and Pod prefix (dsv2lite)
+#   RANKS              data parallel ranks, one GPU each (4)
+#   API_PORT           first rank's HTTP port; rank i listens on API_PORT + i (8000)
+#   RPC_PORT           data parallel RPC port (5555)
+#   MODEL              Hugging Face model id (deepseek-ai/DeepSeek-V2-Lite)
+#   IMAGE_PULL_SECRET  secret holding registry credentials (ghcr-pull-secret)
+#   MODEL_CACHE_PVC    claim that holds the weights between Pod recreations (model-cache-pvc)
+#   SRIOV_NETWORK      network-attachment-definition for the RDMA VF (default/compute-p1v0)
+#   GPU_RESOURCE       GPU resource name (nvidia.com/gpu)
+#   RDMA_RESOURCE      RDMA resource name (rdma/roce_gdr)
+#   SRIOV_RESOURCE     SR-IOV VF resource name (openshift.io/p1_sriov_nodepolicy)
+#
+# The container command contains shell variables of its own; substitute an
+# explicit list:
+#
+#   envsubst '${NAMESPACE} ${VLLM_IMAGE} ${LWS_NAME} ${RANKS} ${API_PORT} ${RPC_PORT} ${MODEL} ${IMAGE_PULL_SECRET} ${MODEL_CACHE_PVC} ${SRIOV_NETWORK} ${GPU_RESOURCE} ${RDMA_RESOURCE} ${SRIOV_RESOURCE}' \
+#     < hack/e2e/lws.yaml | kubectl --context "$CTX" apply -f -
+apiVersion: leaderworkerset.x-k8s.io/v1
+kind: LeaderWorkerSet
+metadata:
+  name: ${LWS_NAME}
+  namespace: ${NAMESPACE}
+spec:
+  replicas: 1
+  rolloutStrategy:
+    type: RollingUpdate
+  leaderWorkerTemplate:
+    size: 1
+    # IRO resets a Pod in place only under restartPolicy None; under
+    # RecreateGroupOnPodRestart any container restart recreates the group
+    # before IRO can shrink it.
+    restartPolicy: None
+    leaderTemplate: &template
+      metadata:
+        labels:
+          app: ${LWS_NAME}
+        annotations:
+          k8s.v1.cni.cncf.io/networks: ${SRIOV_NETWORK}
+      spec:
+        imagePullSecrets:
+        - name: ${IMAGE_PULL_SECRET}
+        volumes:
+        - name: cache
+          emptyDir: {}
+        # Kubernetes defaults /dev/shm to 64MiB; each rank's frontend-to-engine
+        # ring buffer asks for 160MiB, and CUDA IPC needs shared memory too.
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 16Gi
+        # A recreated Pod otherwise downloads the weights again.
+        - name: models
+          persistentVolumeClaim:
+            claimName: ${MODEL_CACHE_PVC}
+        containers:
+        - name: vllm
+          image: ${VLLM_IMAGE}
+          command: ["/bin/sh", "-c"]
+          args:
+          - |
+            # The SR-IOV device plugin injects one PCIDEVICE_..._INFO env var per
+            # attached NIC, naming the uverbs file this Pod actually has access to
+            # (its mlx5_N numbering varies per Pod/node). /sys/class/infiniband
+            # lists every device on the host regardless of what this Pod can use,
+            # so NVSHMEM_HCA_LIST, UCX_NET_DEVICES and NCCL_IB_HCA (each library's
+            # own device-restriction var, same mlx5_N:port syntax) are built from
+            # these env vars instead. Without NCCL_IB_HCA, NCCL independently scans
+            # /sys/class/infiniband and can pick a device this Pod has no access to.
+            # One rail only: with all 8 attached, every VF shares 172.24.0.0/16 and
+            # a peer Pod's wrong VF answers ARP for the target IP (arp_ignore=0),
+            # so RDMA is addressed to the wrong MAC and the sender exhausts its
+            # retries (IBV_WC_RETRY_EXC_ERR, vendor_err=129).
+            RAILS=""
+            for i in 1 2 3 4 5 6 7 8; do
+              var="PCIDEVICE_OPENSHIFT_IO_P${i}_SRIOV_NODEPOLICY_INFO"
+              val=$(eval "echo \$$var")
+              num=$(echo "$val" | grep -oE 'uverbs[0-9]+' | tail -1 | sed 's/uverbs//')
+              [ -n "$num" ] && RAILS="${RAILS:+$RAILS,}mlx5_${num}:1"
+            done
+            export NVSHMEM_HCA_LIST="$RAILS"
+            export UCX_NET_DEVICES="$RAILS"
+            export UCX_IB_GID_INDEX=3
+            export NCCL_IB_HCA="$RAILS"
+            export NCCL_DEBUG=INFO
+            export NCCL_DEBUG_SUBSYS=INIT,NET
+            echo "NVSHMEM_HCA_LIST=$NVSHMEM_HCA_LIST"
+            echo "NCCL_IB_HCA=$NCCL_IB_HCA"
+            # NVSHMEM 3.4.5 never zeroes ibv_ah_attr.static_rate in
+            # ibgda_create_dct_shared_objects, so the stack byte decides whether
+            # ibv_create_ah succeeds. It is 0xff here, which the kernel rejects
+            # with EINVAL, and every rank fails NVSHMEM init under
+            # deepep_low_latency. NVSHMEM 3.5.21 added the missing memset.
+            # Preload a shim that zeroes the field. It hooks dlsym because
+            # NVSHMEM resolves ibv_create_ah through dlopen("libibverbs.so.1").
+            cat > /tmp/ahfix.c <<'AHSHIM'
+            #define _GNU_SOURCE
+            #include <dlfcn.h>
+            #include <string.h>
+            struct ibv_pd;
+            struct ibv_ah;
+            struct ah_attr_min {
+                unsigned char dgid[16];
+                unsigned int flow_label;
+                unsigned char sgid_index, traffic_class, hop_limit, reserved;
+                unsigned short dlid;
+                unsigned char sl, src_path_bits, static_rate, is_global, port_num;
+            };
+            typedef struct ibv_ah *(*create_ah_t)(struct ibv_pd *, void *);
+            static create_ah_t real_create_ah;
+            static void *(*real_dlsym)(void *, const char *);
+            static struct ibv_ah *fixed_create_ah(struct ibv_pd *pd, void *attr_void) {
+                struct ah_attr_min *attr = (struct ah_attr_min *)attr_void;
+                unsigned char saved = attr->static_rate;
+                attr->static_rate = 0;
+                struct ibv_ah *ah = real_create_ah(pd, attr);
+                attr->static_rate = saved;
+                return ah;
+            }
+            static void *dispatch_dlsym(void *handle, const char *name) {
+                if (!real_dlsym) {
+                    real_dlsym = (void *(*)(void *, const char *))dlvsym(RTLD_NEXT, "dlsym", "GLIBC_2.34");
+                    if (!real_dlsym)
+                        real_dlsym = (void *(*)(void *, const char *))dlvsym(RTLD_NEXT, "dlsym", "GLIBC_2.2.5");
+                }
+                if (strcmp(name, "ibv_create_ah") == 0) {
+                    if (!real_create_ah) real_create_ah = (create_ah_t)real_dlsym(handle, name);
+                    return (void *)fixed_create_ah;
+                }
+                return real_dlsym(handle, name);
+            }
+            void *dlsym_225(void *h, const char *n) { return dispatch_dlsym(h, n); }
+            void *dlsym_234(void *h, const char *n) { return dispatch_dlsym(h, n); }
+            __asm__(".symver dlsym_225,dlsym@GLIBC_2.2.5");
+            __asm__(".symver dlsym_234,dlsym@@GLIBC_2.34");
+            AHSHIM
+            printf 'GLIBC_2.2.5 { };\nGLIBC_2.34 { } GLIBC_2.2.5;\n' > /tmp/ahfix.map
+            gcc -shared -fPIC -O2 -o /tmp/ahfix.so /tmp/ahfix.c -ldl \
+              -Wl,--version-script=/tmp/ahfix.map || exit 1
+            export LD_PRELOAD=/tmp/ahfix.so
+            # One download shared by every rank instead of one per rank.
+            python -c "from huggingface_hub import snapshot_download; snapshot_download('${MODEL}')"
+            # The data parallel step waits on a CPU gloo all-reduce that has no
+            # timeout by default. A survivor whose peer died inside the
+            # collective then waits indefinitely and never reports the fault,
+            # and IRO's 75s diagnosis deadline resets the group. 30s surfaces
+            # the fault with room left for the reconfig inside the engine's
+            # 120s recovery timeout.
+            for r in $(seq 0 $(( ${RANKS} - 1 ))); do
+              CUDA_VISIBLE_DEVICES=$r vllm serve ${MODEL} \
+                --port $(( ${API_PORT} + r )) \
+                --trust-remote-code \
+                --enable-fault-tolerance \
+                --data-parallel-external-lb \
+                --tensor-parallel-size 1 \
+                --data-parallel-size ${RANKS} \
+                --data-parallel-size-local 1 \
+                --data-parallel-address "${LWS_LEADER_ADDRESS}" \
+                --data-parallel-rpc-port ${RPC_PORT} \
+                --data-parallel-rank $r \
+                --enable-expert-parallel \
+                --enable-eplb \
+                --all2all-backend nixl_ep \
+                --cpu-distributed-timeout-seconds 30 \
+                --eplb-config '{"num_redundant_experts": 32}' \
+                --gpu-memory-utilization 0.85 &
+            done
+            wait -n
+            # A rank can exit while the group recovers. Keep the container up so
+            # IRO sees that rank die and the others keep serving.
+            echo "a vllm rank process exited; container stays up for recovery"
+            sleep infinity
+          ports:
+          - containerPort: ${API_PORT}
+            name: api
+          env:
+          - name: VLLM_KEEP_ALIVE_ON_ENGINE_DEATH
+            value: "1"
+          # The Pod's pids cgroup limit is 4096 tasks and a task is a thread.
+          # Each vllm process otherwise builds an OpenMP pool from the node's
+          # CPU count (200-420 threads per process, four frontends and four
+          # EngineCores here), so the fourth rank's thread creation fails with
+          # EAGAIN inside gloo and NCCL group setup. Setting OMP_NUM_THREADS
+          # makes vLLM skip its own pool sizing, and 1 is what it runs
+          # steady-state serving with anyway.
+          - name: OMP_NUM_THREADS
+            value: "1"
+          - name: OPENBLAS_NUM_THREADS
+            value: "1"
+          - name: MKL_NUM_THREADS
+            value: "1"
+          - name: NUMEXPR_NUM_THREADS
+            value: "1"
+          - name: HOME
+            value: /cache
+          - name: HF_HOME
+            value: /models/${LWS_NAME}-hf
+          volumeMounts:
+          - name: cache
+            mountPath: /cache
+          - name: shm
+            mountPath: /dev/shm
+          - name: models
+            mountPath: /models
+          resources:
+            limits:
+              ${GPU_RESOURCE}: "${RANKS}"
+              ${RDMA_RESOURCE}: "1"
+              ${SRIOV_RESOURCE}: "1"
+            requests:
+              ${GPU_RESOURCE}: "${RANKS}"
+              ${RDMA_RESOURCE}: "1"
+              ${SRIOV_RESOURCE}: "1"
+          # No liveness probe: a probe that checks /health or runs a completion
+          # would kill a rank that is paused for recovery, which is the state
+          # the test exercises.
+          readinessProbe:
+            httpGet:
+              path: /v1/fault_tolerance/status
+              port: ${API_PORT}
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            failureThreshold: 30
+    workerTemplate: *template
