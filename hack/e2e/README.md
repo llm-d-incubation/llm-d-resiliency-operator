@@ -31,16 +31,31 @@ Both files are rendered with `envsubst`; a variable with no default must be set:
 
 ## Apply
 
-Export the values and apply:
+Set the variables, then render and apply. `envsubst` writes an empty string for a variable that is not
+exported, so the defaults from the table are exported before rendering:
 
 ```sh
 export CTX=...   # kubectl context
+
+export LWS_NAME="${LWS_NAME:-dsv2lite}"
+export RANKS="${RANKS:-4}"
+export API_PORT="${API_PORT:-8000}"
+export RPC_PORT="${RPC_PORT:-5555}"
+export MODEL="${MODEL:-deepseek-ai/DeepSeek-V2-Lite}"
+export IMAGE_PULL_SECRET="${IMAGE_PULL_SECRET:-ghcr-pull-secret}"
+export MODEL_CACHE_PVC="${MODEL_CACHE_PVC:-model-cache-pvc}"
+export SRIOV_NETWORK="${SRIOV_NETWORK:-default/compute-p1v0}"
+export GPU_RESOURCE="${GPU_RESOURCE:-nvidia.com/gpu}"
+export RDMA_RESOURCE="${RDMA_RESOURCE:-rdma/roce_gdr}"
+export SRIOV_RESOURCE="${SRIOV_RESOURCE:-openshift.io/p1_sriov_nodepolicy}"
 
 envsubst '${NAMESPACE} ${VLLM_IMAGE} ${LWS_NAME} ${RANKS} ${API_PORT} ${RPC_PORT} ${MODEL} ${IMAGE_PULL_SECRET} ${MODEL_CACHE_PVC} ${SRIOV_NETWORK} ${GPU_RESOURCE} ${RDMA_RESOURCE} ${SRIOV_RESOURCE}' \
   < hack/e2e/lws.yaml | kubectl --context "$CTX" apply -f -
 envsubst '${NAMESPACE} ${IRO_IMAGE} ${LWS_NAME} ${RANKS} ${API_PORT} ${IMAGE_PULL_SECRET}' \
   < hack/e2e/iro.yaml | kubectl --context "$CTX" apply -f -
 ```
+
+`NAMESPACE`, `VLLM_IMAGE` and `IRO_IMAGE` have no default and stay required.
 
 Keep the allowlist as written. The container command in `lws.yaml` contains shell variables of its own
 (`${i}`, `${RAILS:+$RAILS,}`, `${LWS_LEADER_ADDRESS}`), which a bare `envsubst` would replace.
