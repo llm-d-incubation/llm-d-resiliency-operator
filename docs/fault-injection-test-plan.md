@@ -189,12 +189,18 @@ Flag/deadline names below are the defaults from the controller docs:
 - *Injection (kind)*: fake engine's `Progress` returns `Failed, Scope:
   Group` for an in-flight reconfig.
 - *Injection (GPU)*: kill a second rank mid-reconfig such that the apply
-  path reports the whole attempt broken, not just the joiners.
+  path reports the whole attempt broken, not just the joiners; or kill
+  more ranks than the expert redundancy covers, so the scale-down the
+  policy proposed fails during apply. The policy does not check expert
+  redundancy; it proposes the removal and the engine refuses it.
 - *Pass criteria*: whole group resets; no partially-applied membership
   persists afterward.
 - *Production signal(s)*: rendezvous timeout, when the engine itself
   reports the failure as group-scoped rather than a plain timeout (see #10
-  for the timeout-without-an-explicit-Failed case).
+  for the timeout-without-an-explicit-Failed case). Also covers the
+  redundancy-exhausted branch, where a proposed scale-down cannot place
+  every logical expert; that branch has partial manual validation and
+  stays a locked-in regression.
 
 **10. [A reconfig never finishes](https://llm-d-incubation.github.io/llm-d-resiliency-operator/docs/failures/reconfig-hangs)**
 - *Injection (kind)*: fake engine's `Progress` stays `Running` past a
@@ -219,26 +225,31 @@ Flag/deadline names below are the defaults from the controller docs:
 
 **12. [The engine cannot recover in place](https://llm-d-incubation.github.io/llm-d-resiliency-operator/docs/failures/unrecoverable)**
 - *Injection (kind)*: fake `Policy.Plan` returns `Unrecoverable` directly.
-- *Injection (GPU)*: the insufficient-expert-redundancy case — a
-  scale-down that would leave fewer expert slots than logical experts,
-  which the engine's own policy should refuse.
-- *Pass criteria*: immediate full reset; no partial attempt at a reconfig
-  the policy already says can't work.
-- *Production signal(s)*: DeepEP dispatch timeout, specifically the
-  redundancy-exhausted branch — this already has partial manual validation
-  and should stay a locked-in regression.
+- *Injection (GPU)*: kill every rank's engine process, so no rank survives
+  and the policy returns `Unrecoverable`.
+- *Pass criteria*: no reconfig is sent; the whole group resets.
+- *Production signal(s)*: a group-wide out-of-memory kill, where every
+  engine process exits and no rank remains to plan over.
 
 ### IRO Itself
 
 **13. [The IRO leader dies mid-reconfig](https://llm-d-incubation.github.io/llm-d-resiliency-operator/docs/failures/leader-dies)**
-- *Injection (kind/GPU)*: kill the leader (or force a journal save
-  conflict) at each of three points: before `Apply`, after `Apply` but
-  before acceptances are saved, after acceptances are saved but before
-  `Progress=Succeeded`.
-- *Pass criteria*: no acceptance saved + nothing reached the engine → new
-  leader resends the same reconfig ID; acceptance saved → new leader
-  watches `Progress` instead of resending. Must produce "never sent twice"
-  for every crash point.
+- *Injection (kind)*: kill the leader (or force a journal save conflict)
+  at each of three points: before `Apply`, after `Apply` but before
+  acceptances are saved, after acceptances are saved but before
+  `Progress=Succeeded`. The fake engine's `Progress` returns `NotStarted`
+  for a reconfig the ranks never received.
+- *Injection (GPU)*: the same three points against the real engine, whose
+  `Progress` never returns `NotStarted`: a reconfig that never reached the
+  ranks is reported as `Failed` with scope `Group`.
+- *Pass criteria (kind)*: no acceptance saved + nothing reached the engine
+  → new leader resends the same reconfig ID; acceptance saved → new
+  leader watches `Progress` instead of resending. Must produce "never sent
+  twice" for every crash point.
+- *Pass criteria (GPU)*: a leader that dies after the reconfig is saved
+  but before the ranks receive it ends in a group reset, not a resend;
+  once the reconfig reached the ranks, the new leader watches `Progress`
+  and never sends it twice.
 - *Production signal(s)*: operator crash / leader failover, mid-round.
   Note: the page as written covers the reconfig-in-flight case; the *idle*
   failover case (no reconfig in flight) isn't its own catalog page today —

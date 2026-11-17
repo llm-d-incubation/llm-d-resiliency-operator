@@ -289,6 +289,40 @@ func TestFlowMemberDiesMatchesCatalog(t *testing.T) {
 	}
 }
 
+// TestFlowTwoRanksDieAtOnce checks the pass criteria from docs/failures/several-members-die.md: two
+// ranks terminal in the same observation are removed by a single reconfig, not two in sequence.
+func TestFlowTwoRanksDieAtOnce(t *testing.T) {
+	t.Parallel()
+	run := newFlow(t)
+	run.fault(1, 3)
+	run.until("shrunk and kept below full", func(record enginefault.Record) bool {
+		return served(&record) && record.Members[engine.MemberID("dp1@id1")] == enginefault.Rejected &&
+			record.Members[engine.MemberID("dp3@id3")] == enginefault.Rejected
+	})
+
+	if len(run.sim.applies) != 2 {
+		t.Fatalf("one reconfig should reach each of the two survivors once, applies %v", run.sim.applies)
+	}
+	id, _, _ := strings.Cut(run.sim.applies[0], ":")
+	for _, apply := range run.sim.applies {
+		if !strings.HasPrefix(apply, id+":scale_down:") {
+			t.Fatalf("applies %v are not all the same reconfig", run.sim.applies)
+		}
+	}
+	removed, ok := params(t, run.fleet.ranks[0].applied[0])["removed_dp_ranks"].([]any)
+	if !ok || !slices.Contains(removed, 1.0) || !slices.Contains(removed, 3.0) {
+		t.Fatalf("removed_dp_ranks should name both dead ranks together, got %v", removed)
+	}
+	for _, survivor := range []int{0, 2} {
+		if run.fleet.ranks[survivor].prompts != 1 {
+			t.Fatalf("survivor dp%d should be verified exactly once, prompts %d", survivor, run.fleet.ranks[survivor].prompts)
+		}
+	}
+	if run.wl.resetCall != 0 || run.wl.resetAll != 0 {
+		t.Fatalf("vLLM cannot grow: no Pod reset, no group reset; reset calls %d, group resets %d", run.wl.resetCall, run.wl.resetAll)
+	}
+}
+
 func TestFlowStoreHostIsRemoved(t *testing.T) {
 	t.Parallel()
 	run := newFlow(t)
