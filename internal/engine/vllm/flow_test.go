@@ -269,6 +269,135 @@ func TestFlowTransientFaultIsRetried(t *testing.T) {
 	}
 }
 
+func TestFlowVerificationKeepsRecovering(t *testing.T) {
+	t.Parallel()
+	for _, interruption := range []string{"none", "unreadable member", "another fault", "legacy serving journal"} {
+		t.Run(interruption, func(t *testing.T) {
+			t.Parallel()
+			run := newFlow(t)
+			run.fleet.ranks[2].mu.Lock()
+			run.fleet.ranks[2].tokens = 0
+			run.fleet.ranks[2].mu.Unlock()
+			run.fault(3)
+			record := run.until("waiting for verification", func(record enginefault.Record) bool {
+				return len(record.Verifying) > 0
+			})
+			if record.Phase != enginefault.Recovering {
+				t.Fatalf("phase %s while verifying %v", record.Phase, record.Verifying)
+			}
+			switch interruption {
+			case "legacy serving journal":
+				record.Phase = enginefault.Serving
+				data, err := json.Marshal(record)
+				if err != nil {
+					t.Fatal(err)
+				}
+				run.store.mu.Lock()
+				run.store.data, run.store.version = data, run.store.version+1
+				run.store.mu.Unlock()
+				fsm, err := enginefault.New(t.Context(), run.wl, run.fleet.eng, run.store,
+					telemetry.New(logr.Discard(), time.Minute), enginefault.Defaults())
+				if err != nil {
+					t.Fatal(err)
+				}
+				run.fsm = fsm
+				if err := run.fsm.Step(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+				record = run.store.record(t)
+				if record.Phase != enginefault.Recovering || len(record.Verifying) == 0 {
+					t.Fatalf("unverified legacy journal: %+v", record)
+				}
+			case "unreadable member":
+				run.fleet.ranks[0].mu.Lock()
+				run.fleet.ranks[0].down = true
+				run.fleet.ranks[0].mu.Unlock()
+				if err := run.fsm.Step(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+				run.fleet.ranks[0].mu.Lock()
+				run.fleet.ranks[0].down = false
+				run.fleet.ranks[0].mu.Unlock()
+				if err := run.fsm.Step(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+				record = run.store.record(t)
+				if record.Phase != enginefault.Recovering || len(record.Verifying) == 0 {
+					t.Fatalf("verification skipped after unreadable member: %+v", record)
+				}
+			case "another fault":
+				run.fleet.ranks[1].set("dead", nil)
+				for _, rank := range []int{0, 2} {
+					run.fleet.ranks[rank].unhealthy()
+				}
+			}
+			run.fleet.ranks[2].mu.Lock()
+			run.fleet.ranks[2].tokens = 8
+			run.fleet.ranks[2].mu.Unlock()
+			run.until("verified serving", func(record enginefault.Record) bool { return served(&record) })
+			want := 3
+			if interruption == "another fault" {
+				want = 5
+			}
+			if run.wl.resetAll != 0 || len(run.sim.applies) != want {
+				t.Fatalf("group resets %d, applies %v, want %d", run.wl.resetAll, run.sim.applies, want)
+			}
+		})
+	}
+}
+
+func TestFlowSelfRecoveredFaultStillVerifies(t *testing.T) {
+	t.Parallel()
+	run := newFlow(t)
+	run.fault()
+	if err := run.fsm.Step(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	for _, fake := range run.fleet.ranks {
+		fake.set("healthy", nil)
+	}
+	run.fleet.ranks[2].mu.Lock()
+	run.fleet.ranks[2].tokens = 0
+	run.fleet.ranks[2].mu.Unlock()
+	if err := run.fsm.Step(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	record := run.store.record(t)
+	if record.Phase != enginefault.Recovering || len(record.Verifying) == 0 {
+		t.Fatalf("unverified self-recovery: %+v", record)
+	}
+	run.fleet.ranks[2].mu.Lock()
+	run.fleet.ranks[2].tokens = 8
+	run.fleet.ranks[2].mu.Unlock()
+	run.until("verified self-recovery", func(record enginefault.Record) bool { return served(&record) })
+	if run.wl.resetAll != 0 || len(run.sim.applies) != 0 {
+		t.Fatalf("group resets %d, applies %v", run.wl.resetAll, run.sim.applies)
+	}
+}
+
+func TestFlowVerificationFailureResetsGroup(t *testing.T) {
+	t.Parallel()
+	run := newFlow(t)
+	config := enginefault.Defaults()
+	config.PollInterval, config.VerifyTimeout = time.Millisecond, 0
+	fsm, err := enginefault.New(t.Context(), run.wl, run.fleet.eng, run.store,
+		telemetry.New(logr.Discard(), time.Minute), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run.fsm = fsm
+	run.fleet.ranks[2].mu.Lock()
+	run.fleet.ranks[2].tokens = 0
+	run.fleet.ranks[2].mu.Unlock()
+	run.fault(3)
+	record := run.until("reset after failed verification", func(record enginefault.Record) bool {
+		return record.Phase == enginefault.Starting
+	})
+	if run.wl.resetAll != 1 || !strings.HasPrefix(record.Reason, "verify_failed:") || len(record.Verifying) != 0 {
+		t.Fatalf("group resets %d, record %+v", run.wl.resetAll, record)
+	}
+}
+
 func TestFlowSecondFaultRemovesAnotherRank(t *testing.T) {
 	t.Parallel()
 	run := newFlow(t)

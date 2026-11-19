@@ -10,7 +10,7 @@
 <text x="550.0" y="190.0" font-size="13" fill="#5f6368" text-anchor="middle" xml:space="preserve">the group serves</text>
 <rect x="830.0" y="130.0" width="200.0" height="84.0" rx="42" fill="#fef7e0" stroke="#f29900" stroke-width="2.5"/>
 <text x="930.0" y="166.0" font-size="19" fill="#f29900" text-anchor="middle" font-weight="700" xml:space="preserve">recovering</text>
-<text x="930.0" y="190.0" font-size="13" fill="#5f6368" text-anchor="middle" xml:space="preserve">a fault is repaired</text>
+<text x="930.0" y="190.0" font-size="13" fill="#5f6368" text-anchor="middle" xml:space="preserve">repair and verify</text>
 <path d="M 270.0 172.0 L 450.0 172.0" fill="none" stroke="#1e8e3e" stroke-width="1.8"/>
 <polygon points="450.0,172.0 440.8,175.9 440.8,168.1" fill="#1e8e3e"/>
 <text x="360.0" y="162.0" font-size="12" fill="#1e8e3e" text-anchor="middle" xml:space="preserve">every member is up</text>
@@ -19,7 +19,7 @@
 <text x="740.0" y="148.0" font-size="12" fill="#f29900" text-anchor="middle" xml:space="preserve">a fault</text>
 <path d="M 830.0 192.0 L 650.0 192.0" fill="none" stroke="#1e8e3e" stroke-width="1.8"/>
 <polygon points="650.0,192.0 659.2,188.1 659.2,195.9" fill="#1e8e3e"/>
-<text x="740.0" y="212.0" font-size="12" fill="#1e8e3e" text-anchor="middle" xml:space="preserve">repaired</text>
+<text x="740.0" y="212.0" font-size="12" fill="#1e8e3e" text-anchor="middle" xml:space="preserve">verified</text>
 <path d="M 550.0 214.0 L 550.0 270.0 L 200.0 270.0 L 200.0 214.0" fill="none" stroke="#d93025" stroke-width="1.8"/>
 <polygon points="200.0,214.0 203.9,223.2 196.1,223.2" fill="#d93025"/>
 <path d="M 930.0 214.0 L 930.0 310.0 L 140.0 310.0 L 140.0 214.0" fill="none" stroke="#d93025" stroke-width="1.8"/>

@@ -42,14 +42,14 @@ The controller is always in one of three states. There is no final state: it nev
 | State | Meaning | The controller |
 |---|---|---|
 | `starting` | the group is coming up: a new group, or one that was just reset | waits for every member, then admits them all. No deadline: how fast the group comes up is the workload's call. |
-| `serving` | the group serves, maybe with fewer members than it started with | checks the result of a recovery it just made, and [brings failed Pods back](#getting-back-to-full) |
-| `recovering` | the engine reports a fault | removes dead members in place with a [reconfig](#repairing-a-fault), or retries |
+| `serving` | the group serves, maybe with fewer members than it started with | watches for faults and [brings failed Pods back](#getting-back-to-full) |
+| `recovering` | fault repair or generation verification is pending | removes dead members in place with a [reconfig](#repairing-a-fault), retries and verifies recovery |
 
 | From | To | When |
 |---|---|---|
 | `starting` | `serving` | every member is up: the policy says `Healthy` |
-| `serving` | `recovering` | the engine reports a fault: the policy says anything but `Healthy`, other than adding members back |
-| `recovering` | `serving` | the fault is repaired: the policy says `Healthy`, or the reconfig succeeded |
+| `serving` | `recovering` | the engine reports a fault, or a completed reconfig needs verification |
+| `recovering` | `serving` | generation verification passes. A dry run uses the policy's `Healthy` result. |
 | `serving` or `recovering` | `starting` | recovery in place cannot help, so the controller [resets the group](#resetting-the-group) |
 
 ## Every poll
@@ -191,7 +191,7 @@ The policy decides; the controller acts on its answer by state.
 
 | Plan | In `serving` | In `recovering` |
 |---|---|---|
-| `Healthy` | fine | the fault is over: back to `serving` |
+| `Healthy` | fine | [checks the result](#checking-the-result) before returning to `serving` |
 | `Change` that only adds members | a reconfig to grow back | a reconfig |
 | other `Change` | a fault: go to `recovering` | a reconfig, sent no sooner than 2 polls in |
 | `Wait` | a fault: go to `recovering` | wait, under the diagnosis deadline |
@@ -260,14 +260,13 @@ everything.
 
 ### Checking the result
 
-After a reconfig succeeds, the controller saves its participants and joiners in `Verifying` and calls
-`Verify` on them every poll until it passes. Members the reconfig removed are not checked.
+The group stays `recovering` until generation verification passes. After a reconfig succeeds, the controller
+saves its participants and joiners in `Verifying` and calls `Verify` on them every poll. A fault that clears
+without a reconfig is verified on every admitted member.
 
-One failed request is not a fault: a failure is retried for `--ft-verify-timeout`, and only a member that
-still cannot generate after that resets the group (reason `verify_failed`). If the engine reports a fault
-meanwhile, the group goes to `recovering`; the check resumes when it serves again. A new leader finds
-`Verifying` in the journal and continues the check. Verify runs only here: IRO checks what it changed, nothing
-else.
+Failed checks are retried for `--ft-verify-timeout`, then reset the group if generation still fails (reason
+`verify_failed`). A new engine fault starts diagnosis again; generation is verified before returning to
+`serving`. A new leader finds `Verifying` in the journal and continues the check.
 
 ## Getting back to full
 
