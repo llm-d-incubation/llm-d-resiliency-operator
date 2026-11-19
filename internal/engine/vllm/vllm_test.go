@@ -32,6 +32,7 @@ type fakeRank struct {
 	health  int
 	text    string
 	tokens  int
+	finish  string
 	applied []map[string]any
 	prompts int
 	down    bool
@@ -95,7 +96,7 @@ func (fake *fakeRank) ServeHTTP(writer http.ResponseWriter, request *http.Reques
 	case "/v1/completions":
 		fake.prompts++
 		reply(writer, map[string]any{
-			"choices": []any{map[string]any{"text": fake.text}},
+			"choices": []any{map[string]any{"text": fake.text, "finish_reason": fake.finish}},
 			"usage":   map[string]any{"completion_tokens": fake.tokens},
 		})
 	default:
@@ -137,7 +138,7 @@ func newFleet(t *testing.T, pods, perPod int) *fleet {
 			Identity: fmt.Sprintf("id%d", index), State: workload.PodReady,
 		})
 		for local := range perPod {
-			fake := &fakeRank{rank: index*perPod + local, health: http.StatusOK, text: " two", tokens: 8}
+			fake := &fakeRank{rank: index*perPod + local, health: http.StatusOK, text: " two", tokens: 8, finish: "length"}
 			fake.set("healthy", nil)
 			server := httptest.NewServer(fake)
 			t.Cleanup(server.Close)
@@ -536,6 +537,45 @@ func TestVerify(t *testing.T) {
 	}
 }
 
+func TestVerifyRejectsIncompleteResponses(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name  string
+		body  string
+		valid bool
+	}{
+		{"complete", `{"choices":[{"text":" two","finish_reason":"length"}],"usage":{"completion_tokens":8}}`, true},
+		{"hidden tokens", `{"choices":[{"text":"","finish_reason":"length"}],"usage":{"completion_tokens":8}}`, true},
+		{"aborted", `{"choices":[{"text":" partial","finish_reason":"abort"}],"usage":{"completion_tokens":8}}`, false},
+		{"stopped early", `{"choices":[{"text":" two","finish_reason":"stop"}],"usage":{"completion_tokens":8}}`, false},
+		{"unfinished", `{"choices":[{"text":" partial","finish_reason":null}],"usage":{"completion_tokens":8}}`, false},
+		{"no finish reason", `{"choices":[{"text":" two"}],"usage":{"completion_tokens":8}}`, false},
+		{"no choices", `{"choices":[],"usage":{"completion_tokens":8}}`, false},
+		{"short generation", `{"choices":[{"text":" two","finish_reason":"length"}],"usage":{"completion_tokens":7}}`, false},
+		{"multiple choices", `{"choices":[{"finish_reason":"length"},{"finish_reason":"abort"}],` +
+			`"usage":{"completion_tokens":8}}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+				if _, err := writer.Write([]byte(tc.body)); err != nil {
+					t.Error(err)
+				}
+			}))
+			t.Cleanup(server.Close)
+			eng := &Engine{client: server.Client()}
+			obs := engine.Observation{Engine: ranks{"dp0@id0": {Address: server.Listener.Addr().String()}}}
+			err := eng.Verify(t.Context(), obs, ids("dp0@id0"))
+			if (err == nil) != tc.valid {
+				t.Fatalf("valid=%v, err=%v", tc.valid, err)
+			}
+			if err != nil && !strings.Contains(err.Error(), "dp0@id0") {
+				t.Fatalf("error does not name the member: %v", err)
+			}
+		})
+	}
+}
+
 func TestProbeWakesServingRanks(t *testing.T) {
 	t.Parallel()
 	test := newFleet(t, 3, 1)
@@ -561,7 +601,7 @@ func TestOptions(t *testing.T) {
 
 func TestAuthenticatedHTTPS(t *testing.T) {
 	t.Parallel()
-	fake := &fakeRank{rank: 0, health: http.StatusOK, tokens: 8}
+	fake := &fakeRank{rank: 0, health: http.StatusOK, tokens: 8, finish: "length"}
 	fake.set("healthy", nil)
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer test-key" {
