@@ -14,6 +14,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	"github.com/llm-d/llm-d-resiliency-operator/internal/controller/enginefault"
+	"github.com/llm-d/llm-d-resiliency-operator/internal/engine/sglang"
 	"github.com/llm-d/llm-d-resiliency-operator/internal/engine/vllm"
 	"github.com/llm-d/llm-d-resiliency-operator/internal/telemetry"
 	"github.com/llm-d/llm-d-resiliency-operator/internal/workload/lws"
@@ -42,7 +43,7 @@ func main() {
 	flag.StringVar(&leaderElectionID, "leader-election-id", "llm-d-resiliency-operator-leader",
 		"Lease name for leader election; give each manager in a namespace its own.")
 	engineFT := enginefault.Options{
-		Engines:   map[string]enginefault.EngineFactory{"vllm": &vllm.Options{}},
+		Engines:   map[string]enginefault.EngineFactory{"sglang": &sglang.Options{}, "vllm": &vllm.Options{}},
 		Workloads: map[string]enginefault.WorkloadFactory{"lws": &lws.Options{}},
 	}
 	engineFT.BindFlags(flag.CommandLine)
