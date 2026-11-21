@@ -84,7 +84,7 @@ func load(ctx context.Context, wl workload.Workload, eng engine.Engine, store jo
 	}
 	return &controller{
 		wl: wl, eng: eng, store: store, recorder: recorder, config: config, now: now, saved: saved, version: version,
-		waited: true,
+		waited: record.UnseenSince.IsZero() && record.PausedSince.IsZero(),
 	}, nil
 }
 
@@ -159,9 +159,6 @@ func (fsm *controller) step(ctx context.Context, next *Record) error {
 	if err != nil {
 		return fsm.unseen(ctx, next, now, true, fmt.Errorf("discover: %w", err))
 	}
-	if next.UnseenByDiscover {
-		resume(next, now)
-	}
 	next.RecreateStopped = group.RecreateStopped
 	if waiting, err := fsm.waitForWorkload(ctx, next, &group, now); waiting || err != nil {
 		return err
@@ -179,9 +176,6 @@ func (fsm *controller) step(ctx context.Context, next *Record) error {
 	fsm.comparePods(ctx, next, &group)
 	current := fsm.connect(ctx, next, &group)
 	if len(current.unknown) > 0 && current.read == 0 {
-		if since := next.UnseenSince; !since.IsZero() && fsm.config.UnseenTimeout > 0 && now.Sub(since) >= fsm.config.UnseenTimeout {
-			return fsm.resetAll(ctx, next, ResetUnseen, "no admitted member could be read since "+since.Format(time.RFC3339), now)
-		}
 		return fsm.unseen(ctx, next, now, false, errors.New("observe: no admitted member could be read"))
 	}
 	resume(next, now)
@@ -198,24 +192,44 @@ func (fsm *controller) step(ctx context.Context, next *Record) error {
 }
 
 func (fsm *controller) unseen(ctx context.Context, next *Record, now time.Time, byDiscover bool, err error) error {
-	changed := next.UnseenSince.IsZero() || byDiscover && !next.UnseenByDiscover
+	if next.PausedSince.IsZero() {
+		next.PausedSince = next.UnseenSince
+		if next.PausedSince.IsZero() {
+			next.PausedSince = now
+		}
+	}
 	if next.UnseenSince.IsZero() {
 		next.UnseenSince = now
-	}
-	next.UnseenByDiscover = next.UnseenByDiscover || byDiscover
-	if changed {
-		if saveErr := fsm.save(ctx, next); saveErr != nil {
-			return saveErr
+	} else if byDiscover != next.UnseenByDiscover {
+		if !next.UnseenByDiscover {
+			next.UnseenElapsed += now.Sub(next.UnseenSince)
 		}
+		next.UnseenSince = now
+	}
+	next.UnseenByDiscover = byDiscover
+	if !byDiscover && fsm.config.UnseenTimeout > 0 {
+		if elapsed := next.UnseenElapsed + now.Sub(next.UnseenSince); elapsed >= fsm.config.UnseenTimeout {
+			return fsm.resetAll(ctx, next, ResetUnseen,
+				fmt.Sprintf("no admitted member could be read for %s with successful discovery", elapsed), now)
+		}
+	}
+	if saveErr := fsm.save(ctx, next); saveErr != nil {
+		return saveErr
 	}
 	return err
 }
 
 func resume(next *Record, now time.Time) {
-	if next.UnseenSince.IsZero() {
+	since := next.PausedSince
+	if since.IsZero() {
+		since = next.UnseenSince
+	}
+	next.PausedSince, next.UnseenSince = time.Time{}, time.Time{}
+	next.UnseenByDiscover, next.UnseenElapsed = false, 0
+	if since.IsZero() {
 		return
 	}
-	gap := now.Sub(next.UnseenSince)
+	gap := now.Sub(since)
 	if next.Phase == Recovering {
 		next.Since = next.Since.Add(gap)
 	}
@@ -225,7 +239,6 @@ func resume(next *Record, now time.Time) {
 	if !next.VerifyFailedSince.IsZero() {
 		next.VerifyFailedSince = next.VerifyFailedSince.Add(gap)
 	}
-	next.UnseenSince, next.UnseenByDiscover = time.Time{}, false
 }
 
 func (fsm *controller) waitForWorkload(ctx context.Context, next *Record, group *workload.Group, now time.Time) (bool, error) {
@@ -287,7 +300,8 @@ func (fsm *controller) startOver(next *Record, reason string, now time.Time) {
 }
 
 func (fsm *controller) start(ctx context.Context, next *Record, group *workload.Group, now time.Time) error {
-	next.UnseenSince, next.UnseenByDiscover = time.Time{}, false
+	next.PausedSince, next.UnseenSince = time.Time{}, time.Time{}
+	next.UnseenByDiscover, next.UnseenElapsed = false, 0
 	next.Pods = map[string]PodRecord{}
 	for index := range group.Pods {
 		if pod := &group.Pods[index]; pod.State != workload.PodTerminating {
