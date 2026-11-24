@@ -97,7 +97,7 @@
               ]
             },
             {"to": "policy", "call": "Progress(observation, reconfig)", "out": "Succeeded"},
-            {"to": "journal", "call": "Save(record)", "in": "reconfig completed; removed members excluded; phase serving; participants pending verification"},
+            {"to": "journal", "call": "Save(record)", "in": "reconfig completed; removed members excluded; phase recovering; participants pending verification"},
             {
               "to": "driver",
               "call": "Verify(observation, [dp0, dp2])",
