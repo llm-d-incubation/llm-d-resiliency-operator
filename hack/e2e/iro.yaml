@@ -1,0 +1,95 @@
+# IRO for the "a member dies" e2e test: one leader watching the LeaderWorkerSet
+# in lws.yaml, whose single Pod holds ${RANKS} vLLM ranks. The Role, the
+# RoleBinding and the journal ConfigMap live in the same namespace as the LWS.
+#
+# Values that depend on the cluster are substituted from the environment:
+#
+#   NAMESPACE          namespace of the LWS, the journal and IRO (required)
+#   IRO_IMAGE          operator image (required)
+#   LWS_NAME           LeaderWorkerSet to watch (dsv2lite)
+#   RANKS              data parallel ranks in each Pod (4)
+#   API_PORT           first rank's HTTP port (8000)
+#   IMAGE_PULL_SECRET  secret holding registry credentials (ghcr-pull-secret)
+#
+#   envsubst '${NAMESPACE} ${IRO_IMAGE} ${LWS_NAME} ${RANKS} ${API_PORT} ${IMAGE_PULL_SECRET}' \
+#     < hack/e2e/iro.yaml | kubectl --context "$CTX" apply -f -
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: iro
+  namespace: ${NAMESPACE}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: iro
+  namespace: ${NAMESPACE}
+rules:
+- apiGroups: ["leaderworkerset.x-k8s.io"]
+  resources: ["leaderworkersets"]
+  verbs: ["get"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["list", "delete"]
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "create", "update"]
+- apiGroups: ["coordination.k8s.io"]
+  resources: ["leases"]
+  verbs: ["get", "create", "update"]
+- apiGroups: ["", "events.k8s.io"]
+  resources: ["events"]
+  verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: iro
+  namespace: ${NAMESPACE}
+subjects:
+- kind: ServiceAccount
+  name: iro
+  namespace: ${NAMESPACE}
+roleRef:
+  kind: Role
+  name: iro
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: iro
+  namespace: ${NAMESPACE}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: iro
+  template:
+    metadata:
+      labels:
+        app: iro
+    spec:
+      serviceAccountName: iro
+      imagePullSecrets:
+      - name: ${IMAGE_PULL_SECRET}
+      containers:
+      - name: manager
+        image: ${IRO_IMAGE}
+        args:
+        # --enable-engine-ft requires --leader-elect.
+        - --leader-elect
+        - --enable-engine-ft
+        - --engine=vllm
+        - --workload=lws
+        - --lws-namespace=${NAMESPACE}
+        - --lws-name=${LWS_NAME}
+        - --vllm-ranks-per-pod=${RANKS}
+        - --vllm-api-port=${API_PORT}
+        resources:
+          requests:
+            cpu: 100m
+            memory: 100Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
