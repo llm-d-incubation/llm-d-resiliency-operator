@@ -217,8 +217,10 @@ Flag/deadline names below are the defaults from the controller docs:
 - *Injection (GPU)*: force a reconfig to apply cleanly but leave one rank
   unable to actually serve tokens.
 - *Pass criteria*: retries for `--ft-verify-timeout` (2m default), then
-  resets with reason `verify_failed`; group must not be marked `serving`
-  while verify is still failing.
+  resets with reason `verify_failed`; while the check retries, the record
+  stays in `serving` (a failed `Verify` is not an engine fault), with the
+  checked members in `Verifying` and the incident open, so recovery is not
+  treated as complete until `Verify` passes.
 - *Production signal(s)*: a successful-looking rejoin followed by a silent
   failure that doesn't repeat as a process exit — closest match for a CUDA
   fault that corrupts state without crashing the process.
